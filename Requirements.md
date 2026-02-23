@@ -1,3 +1,11 @@
 streamlit>=1.28.0
 pandas>=2.0.0
 requests>=2.31.0
+```
+
+**3. `.gitignore`** 
+```
+learning_data.json
+*.pyc
+__pycache__/
+.env
