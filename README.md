@@ -2,21 +2,6 @@
 
 A minimalist English learning desktop app with Spaced Repetition System (SRS).
 
-## 🚀 Quick Start (Windows 10)
-
-### First Time Setup
-
-1. **Install Python**
-   - Download Python 3.10+ from https://www.python.org/downloads/
-   - ⚠️ **Important**: Check "Add Python to PATH" during installation
-
-2. **Download this project**
-   - Extract all files to a folder (e.g., `C:\EchoRecall\`)
-
-3. **Run the app**
-   - Double-click `run_app.bat`
-   - Wait for installation (first time only)
-   - Your browser will open automatically!
 
 ### Daily Use
 

@@ -7,76 +7,248 @@ import requests
 import time
 
 # ============================================================================
-# Configuration & Data Management
+# Configuration & GitHub Gist Storage
 # ============================================================================
 
 DATA_FILE = Path("learning_data.json")
 
 DEFAULT_PHRASE_POOL = [
-    {"phrase": "break the ice", "chinese": "打破僵局", "example": "Let me tell a joke to break the ice."},
-    {"phrase": "hit the nail on the head", "chinese": "一针见血", "example": "Your analysis hit the nail on the head."},
-    {"phrase": "piece of cake", "chinese": "小菜一碟", "example": "This test was a piece of cake!"},
-    {"phrase": "under the weather", "chinese": "身体不适", "example": "I'm feeling under the weather today."},
-    {"phrase": "call it a day", "chinese": "收工", "example": "Let's call it a day and go home."},
-    {"phrase": "bite the bullet", "chinese": "硬着头皮做", "example": "I had to bite the bullet and apologize."},
-    {"phrase": "on cloud nine", "chinese": "非常高兴", "example": "She was on cloud nine after getting promoted."},
-    {"phrase": "spill the beans", "chinese": "泄露秘密", "example": "Don't spill the beans about the surprise party!"},
-    {"phrase": "cost an arm and a leg", "chinese": "非常昂贵", "example": "That new car cost him an arm and a leg."},
-    {"phrase": "the ball is in your court", "chinese": "该你做决定了", "example": "I've made my offer, now the ball is in your court."},
-    {"phrase": "beat around the bush", "chinese": "拐弯抹角", "example": "Stop beating around the bush and tell me the truth."},
-    {"phrase": "let the cat out of the bag", "chinese": "泄露秘密", "example": "He let the cat out of the bag about the promotion."},
-    {"phrase": "once in a blue moon", "chinese": "千载难逢", "example": "We only see each other once in a blue moon."},
-    {"phrase": "get cold feet", "chinese": "临阵退缩", "example": "He got cold feet before the wedding."},
-    {"phrase": "when pigs fly", "chinese": "不可能", "example": "He'll clean his room when pigs fly."},
+    {"phrase": "break the ice", "chinese": "打破僵局", "example": "Let me tell a joke to break the ice.",
+     "category": "Social"},
+    {"phrase": "hit the nail on the head", "chinese": "一针见血", "example": "Your analysis hit the nail on the head.",
+     "category": "Business"},
+    {"phrase": "piece of cake", "chinese": "小菜一碟", "example": "This test was a piece of cake!",
+     "category": "Daily"},
+    {"phrase": "under the weather", "chinese": "身体不适", "example": "I'm feeling under the weather today.",
+     "category": "Daily"},
+    {"phrase": "call it a day", "chinese": "收工", "example": "Let's call it a day and go home.",
+     "category": "Business"},
+    {"phrase": "bite the bullet", "chinese": "硬着头皮做", "example": "I had to bite the bullet and apologize.",
+     "category": "Daily"},
+    {"phrase": "on cloud nine", "chinese": "非常高兴", "example": "She was on cloud nine after getting promoted.",
+     "category": "Daily"},
+    {"phrase": "spill the beans", "chinese": "泄露秘密", "example": "Don't spill the beans about the surprise party!",
+     "category": "Social"},
+    {"phrase": "cost an arm and a leg", "chinese": "非常昂贵", "example": "That new car cost him an arm and a leg.",
+     "category": "Daily"},
+    {"phrase": "the ball is in your court", "chinese": "该你做决定了",
+     "example": "I've made my offer, now the ball is in your court.", "category": "Business"},
+    {"phrase": "beat around the bush", "chinese": "拐弯抹角",
+     "example": "Stop beating around the bush and tell me the truth.", "category": "Social"},
+    {"phrase": "let the cat out of the bag", "chinese": "泄露秘密",
+     "example": "He let the cat out of the bag about the promotion.", "category": "Social"},
+    {"phrase": "once in a blue moon", "chinese": "千载难逢", "example": "We only see each other once in a blue moon.",
+     "category": "Daily"},
+    {"phrase": "get cold feet", "chinese": "临阵退缩", "example": "He got cold feet before the wedding.",
+     "category": "Social"},
+    {"phrase": "when pigs fly", "chinese": "不可能", "example": "He'll clean his room when pigs fly.",
+     "category": "TV Series"},
 ]
 
-def load_data():
-    """Load or initialize learning data"""
-    if not DATA_FILE.exists():
-        initial_data = {
-            "phrase_pool": DEFAULT_PHRASE_POOL,
-            "learning": [],
-            "mastered": [],
-            "daily_streak": 0,
-            "last_study_date": None,
-            "settings": {
-                "api_key": "",
-                "api_provider": "openai",  # openai or deepseek
-                "deepseek_key": ""
-            }
+
+# ============================================================================
+# GitHub Gist Storage Functions
+# ============================================================================
+
+class GistStorage:
+    """Handle data persistence using GitHub Gist"""
+
+    def __init__(self, token, gist_id=None):
+        self.token = token
+        self.gist_id = gist_id
+        self.headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json"
         }
-        save_data(initial_data)
-        return initial_data
-    
-    with open(DATA_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
+        self.filename = "learning_data.json"
+
+    def create_gist(self, data):
+        """Create a new private Gist"""
+        try:
+            payload = {
+                "description": "EchoRecall English Learning Data",
+                "public": False,
+                "files": {
+                    self.filename: {
+                        "content": json.dumps(data, ensure_ascii=False, indent=2)
+                    }
+                }
+            }
+
+            response = requests.post(
+                "https://api.github.com/gists",
+                headers=self.headers,
+                json=payload,
+                timeout=10
+            )
+
+            if response.status_code == 201:
+                self.gist_id = response.json()['id']
+                return True, self.gist_id
+            else:
+                return False, f"Error {response.status_code}: {response.text}"
+
+        except Exception as e:
+            return False, str(e)
+
+    def read_gist(self):
+        """Read data from existing Gist"""
+        if not self.gist_id:
+            return None, "No Gist ID provided"
+
+        try:
+            response = requests.get(
+                f"https://api.github.com/gists/{self.gist_id}",
+                headers=self.headers,
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                content = response.json()['files'][self.filename]['content']
+                return json.loads(content), None
+            else:
+                return None, f"Error {response.status_code}"
+
+        except Exception as e:
+            return None, str(e)
+
+    def update_gist(self, data):
+        """Update existing Gist"""
+        if not self.gist_id:
+            return self.create_gist(data)
+
+        try:
+            payload = {
+                "files": {
+                    self.filename: {
+                        "content": json.dumps(data, ensure_ascii=False, indent=2)
+                    }
+                }
+            }
+
+            response = requests.patch(
+                f"https://api.github.com/gists/{self.gist_id}",
+                headers=self.headers,
+                json=payload,
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                return True, None
+            else:
+                return False, f"Error {response.status_code}"
+
+        except Exception as e:
+            return False, str(e)
+
+
+def load_data():
+    """Load data from Gist or local file"""
+    # Try cloud storage first
+    github_token = st.session_state.get('github_token', '')
+    gist_id = st.session_state.get('gist_id', '')
+
+    if github_token and gist_id:
+        storage = GistStorage(github_token, gist_id)
+        data, error = storage.read_gist()
+
+        if data:
+            # Migrate old data: add category if missing
+            for phrase in data.get('phrase_pool', []):
+                if 'category' not in phrase:
+                    phrase['category'] = 'Daily'
+            for phrase in data.get('learning', []):
+                if 'category' not in phrase:
+                    phrase['category'] = 'Daily'
+            for phrase in data.get('mastered', []):
+                if 'category' not in phrase:
+                    phrase['category'] = 'Daily'
+            return data
+        else:
+            st.warning(f"⚠️ Failed to load from Gist: {error}. Using local data.")
+
+    # Fallback to local file
+    if DATA_FILE.exists():
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+            # Migrate old data
+            for phrase in data.get('phrase_pool', []):
+                if 'category' not in phrase:
+                    phrase['category'] = 'Daily'
+            for phrase in data.get('learning', []):
+                if 'category' not in phrase:
+                    phrase['category'] = 'Daily'
+            for phrase in data.get('mastered', []):
+                if 'category' not in phrase:
+                    phrase['category'] = 'Daily'
+
+            return data
+
+    # Create new data
+    initial_data = {
+        "phrase_pool": DEFAULT_PHRASE_POOL,
+        "learning": [],
+        "mastered": [],
+        "daily_streak": 0,
+        "last_study_date": None,
+        "settings": {
+            "api_key": "",
+            "api_provider": "openai",
+            "deepseek_key": ""
+        }
+    }
+
+    return initial_data
+
 
 def save_data(data):
-    """Save data to JSON file"""
-    with open(DATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Save data to both Gist and local file"""
+    # Save to local file (backup)
+    try:
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        st.error(f"⚠️ Local save failed: {e}")
 
-def get_today_phrases(data):
-    """Get 5 phrases for today (new or due for review)"""
+    # Save to Gist (cloud)
+    github_token = st.session_state.get('github_token', '')
+    gist_id = st.session_state.get('gist_id', '')
+
+    if github_token:
+        storage = GistStorage(github_token, gist_id)
+        success, error = storage.update_gist(data)
+
+        if success:
+            if not gist_id and storage.gist_id:
+                st.session_state.gist_id = storage.gist_id
+                st.success(f"✅ Cloud sync enabled! Gist ID: {storage.gist_id[:8]}...")
+        else:
+            st.warning(f"⚠️ Cloud sync failed: {error}")
+
+
+def get_today_phrases(data, count=5):
+    """Get phrases for today (new or due for review)"""
     today = datetime.now().date()
-    
+
     # Check for phrases due for review
     due_phrases = []
     for phrase in data['learning']:
         next_review = datetime.strptime(phrase['next_review'], '%Y-%m-%d').date()
         if next_review <= today:
             due_phrases.append(phrase)
-    
+
     # If we need more phrases, add new ones from pool
-    needed = 5 - len(due_phrases)
+    needed = count - len(due_phrases)
     new_phrases = []
     if needed > 0:
-        available = [p for p in data['phrase_pool'] 
+        available = [p for p in data['phrase_pool']
                      if not any(p['phrase'] == lp['phrase'] for lp in data['learning'])
                      and not any(p['phrase'] == mp['phrase'] for mp in data['mastered'])]
         new_phrases = available[:needed]
-    
+
     return due_phrases + new_phrases
+
 
 def calculate_next_review(review_count):
     """Calculate next review date based on Ebbinghaus curve"""
@@ -85,6 +257,7 @@ def calculate_next_review(review_count):
         return None
     return (datetime.now() + timedelta(days=intervals[review_count])).strftime('%Y-%m-%d')
 
+
 def mark_reviewed(data, phrase_text):
     """Mark a phrase as reviewed and update next review date"""
     for phrase in data['learning']:
@@ -92,33 +265,40 @@ def mark_reviewed(data, phrase_text):
             phrase['review_count'] += 1
             phrase['last_review'] = datetime.now().strftime('%Y-%m-%d')
             next_date = calculate_next_review(phrase['review_count'])
-            
+
             if next_date is None:
                 data['mastered'].append(phrase)
                 data['learning'].remove(phrase)
             else:
                 phrase['next_review'] = next_date
-            
+
             save_data(data)
             return True
-    
-    new_phrase = {
-        "phrase": phrase_text,
-        "chinese": next((p['chinese'] for p in data['phrase_pool'] if p['phrase'] == phrase_text), ""),
-        "example": next((p['example'] for p in data['phrase_pool'] if p['phrase'] == phrase_text), ""),
-        "review_count": 0,
-        "last_review": datetime.now().strftime('%Y-%m-%d'),
-        "next_review": calculate_next_review(0)
-    }
-    data['learning'].append(new_phrase)
-    save_data(data)
-    return True
+
+    # If not in learning, add it
+    phrase_data = next((p for p in data['phrase_pool'] if p['phrase'] == phrase_text), None)
+    if phrase_data:
+        new_phrase = {
+            "phrase": phrase_text,
+            "chinese": phrase_data.get('chinese', ''),
+            "example": phrase_data.get('example', ''),
+            "category": phrase_data.get('category', 'Daily'),
+            "review_count": 0,
+            "last_review": datetime.now().strftime('%Y-%m-%d'),
+            "next_review": calculate_next_review(0)
+        }
+        data['learning'].append(new_phrase)
+        save_data(data)
+        return True
+
+    return False
+
 
 def update_streak(data):
     """Update daily streak counter"""
     today = datetime.now().strftime('%Y-%m-%d')
     last_study = data.get('last_study_date')
-    
+
     if last_study != today:
         if last_study is None:
             data['daily_streak'] = 1
@@ -128,9 +308,10 @@ def update_streak(data):
                 data['daily_streak'] += 1
             else:
                 data['daily_streak'] = 1
-        
+
         data['last_study_date'] = today
         save_data(data)
+
 
 # ============================================================================
 # AI API Integration
@@ -143,28 +324,29 @@ def call_openai_api(api_key, messages, model="gpt-4o-mini"):
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-        
+
         payload = {
             "model": model,
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 500
+            "max_tokens": 800
         }
-        
+
         response = requests.post(
             "https://api.openai.com/v1/chat/completions",
             headers=headers,
             json=payload,
             timeout=30
         )
-        
+
         if response.status_code == 200:
             return response.json()['choices'][0]['message']['content']
         else:
             return f"❌ API Error: {response.status_code} - {response.text}"
-    
+
     except Exception as e:
         return f"❌ Connection Error: {str(e)}"
+
 
 def call_deepseek_api(api_key, messages, model="deepseek-chat"):
     """Call DeepSeek API"""
@@ -173,117 +355,207 @@ def call_deepseek_api(api_key, messages, model="deepseek-chat"):
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-        
+
         payload = {
             "model": model,
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 500
+            "max_tokens": 800
         }
-        
+
         response = requests.post(
             "https://api.deepseek.com/v1/chat/completions",
             headers=headers,
             json=payload,
             timeout=30
         )
-        
+
         if response.status_code == 200:
             return response.json()['choices'][0]['message']['content']
         else:
             return f"❌ API Error: {response.status_code} - {response.text}"
-    
+
     except Exception as e:
         return f"❌ Connection Error: {str(e)}"
+
 
 def call_ai_api(data, messages):
     """Unified API caller based on settings"""
     provider = data['settings'].get('api_provider', 'openai')
-    
+
     if provider == 'openai':
         api_key = data['settings'].get('api_key', '')
         if not api_key:
             return "⚠️ Please add your OpenAI API Key in Settings."
         return call_openai_api(api_key, messages)
-    
+
     elif provider == 'deepseek':
         api_key = data['settings'].get('deepseek_key', '')
         if not api_key:
             return "⚠️ Please add your DeepSeek API Key in Settings."
         return call_deepseek_api(api_key, messages)
-    
+
     return "⚠️ Unknown API provider."
 
-def generate_new_phrases(data, count=5):
-    """Auto-generate new phrases using AI"""
-    system_prompt = """You are an English teacher helping create natural, useful English phrases for Chinese learners.
-Generate {count} common English idioms or expressions that are:
-1. Natural and frequently used by native speakers
-2. At intermediate level (B1-B2)
-3. Different from phrases already in the pool
-4. Include diverse topics (work, daily life, emotions, etc.)
 
-Return ONLY valid JSON array format:
+def generate_new_phrases(data, count=5):
+    """Auto-generate high-frequency practical phrases using AI"""
+
+    system_prompt = """You are an expert English teacher specializing in teaching practical, high-frequency English to Chinese learners.
+
+# CRITICAL REQUIREMENTS:
+
+## 1. SOURCE PRIORITY (Ranked by importance):
+- **Tier 1**: Phrases from popular TV series (Friends, Modern Family, The Office, How I Met Your Mother, Brooklyn Nine-Nine)
+- **Tier 2**: Common workplace/office expressions used in meetings, emails, presentations
+- **Tier 3**: Social gathering phrases (parties, dating, small talk, making friends)
+- **Tier 4**: Daily life essentials (shopping, dining, transportation)
+
+## 2. VOCABULARY CONSTRAINTS:
+- MUST use ONLY words from COCA (Corpus of Contemporary American English) top 5000 high-frequency words
+- STRICTLY FORBIDDEN: Literary/archaic/academic/formal vocabulary
+- MUST sound natural when spoken by native speakers in casual contexts
+- Think: "Would a character in Friends say this?"
+
+## 3. DIFFICULTY LEVEL:
+- Lock difficulty at CEFR B1-B2 level (intermediate)
+- Phrases should be challenging enough to learn but not intimidating
+- Avoid beginner phrases like "How are you?" and advanced idioms like "a blessing in disguise"
+
+## 4. CATEGORY CLASSIFICATION:
+Each phrase MUST be tagged with ONE category:
+- **Daily**: Everyday life, routine activities, personal matters
+- **Business**: Workplace, meetings, professional communication, career
+- **TV Series**: Phrases popularized by American TV shows, pop culture references
+- **Social**: Parties, dating, friendships, casual gatherings, small talk
+
+## 5. QUALITY STANDARDS:
+- Phrase must be 2-6 words long (no single words, no long sentences)
+- Example sentence must demonstrate NATURAL usage in context
+- Chinese translation must be colloquial and accurate
+- Prioritize phrases that appear in subtitles of top-rated American TV shows
+
+## 6. DIVERSITY:
+- Balance across all 4 categories
+- Mix verb phrases, adjective phrases, and noun phrases
+- Include both serious and humorous contexts
+
+# OUTPUT FORMAT:
+Return ONLY a valid JSON array with NO markdown, NO explanations, NO additional text:
+
 [
-  {{"phrase": "example phrase", "chinese": "中文翻译", "example": "Example sentence with the phrase."}},
-  ...
+  {
+    "phrase": "grab a bite",
+    "chinese": "随便吃点东西",
+    "example": "Want to grab a bite after work?",
+    "category": "Daily"
+  },
+  {
+    "phrase": "touch base",
+    "chinese": "联系一下/沟通一下",
+    "example": "Let's touch base next week about the project.",
+    "category": "Business"
+  }
 ]
 
-Do NOT include any markdown, explanations, or text outside the JSON array."""
+# EXAMPLES OF GOOD PHRASES:
+✅ "sleep on it" (Daily) - Think about it overnight
+✅ "loop someone in" (Business) - Include someone in communication
+✅ "I'm down" (Social) - I agree/I'm willing to participate
+✅ "my bad" (TV Series) - My mistake (from Friends)
+✅ "give it a shot" (Daily) - Try something
+
+# EXAMPLES OF BAD PHRASES (DO NOT GENERATE):
+❌ "pontificate" (too academic)
+❌ "as luck would have it" (too literary)
+❌ "henceforth" (archaic)
+❌ "ascertain the veracity" (too formal)
+❌ "a penny for your thoughts" (outdated)
+
+Remember: You're creating a vocabulary list for someone who wants to sound like a native speaker in everyday American English, NOT someone preparing for the GRE or reading Shakespeare."""
 
     existing_phrases = [p['phrase'] for p in data['phrase_pool']]
-    user_prompt = f"""Generate {count} new English phrases. 
+    user_prompt = f"""Generate exactly {count} NEW high-frequency English phrases following ALL requirements above.
 
-Already existing phrases (DO NOT repeat): {', '.join(existing_phrases[:20])}
+AVOID these existing phrases: {', '.join(existing_phrases[:30])}
 
-Return JSON array only."""
+Requirements checklist:
+✓ Use ONLY COCA top 5000 words
+✓ Prioritize TV series and workplace phrases
+✓ CEFR B1-B2 difficulty
+✓ Include 'category' field (Daily/Business/TV Series/Social)
+✓ Natural examples that sound like native speakers
+✓ Colloquial Chinese translations
+
+Return pure JSON array only. No markdown, no explanations."""
 
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt}
     ]
-    
-    with st.spinner("🤖 AI is generating new phrases..."):
+
+    with st.spinner("🤖 AI is generating high-quality phrases..."):
         response = call_ai_api(data, messages)
-    
+
     try:
-        # Clean response (remove markdown code blocks if present)
         response = response.strip()
         if response.startswith("```"):
             response = response.split("```")[1]
             if response.startswith("json"):
                 response = response[4:]
         response = response.strip()
-        
+
         new_phrases = json.loads(response)
-        
+
         if isinstance(new_phrases, list) and len(new_phrases) > 0:
-            # Add to phrase pool
-            data['phrase_pool'].extend(new_phrases)
-            save_data(data)
-            return True, len(new_phrases)
+            valid_phrases = []
+            for phrase in new_phrases:
+                if all(key in phrase for key in ['phrase', 'chinese', 'example', 'category']):
+                    if phrase['category'] not in ['Daily', 'Business', 'TV Series', 'Social']:
+                        phrase['category'] = 'Daily'
+                    valid_phrases.append(phrase)
+
+            if valid_phrases:
+                data['phrase_pool'].extend(valid_phrases)
+                save_data(data)
+                return True, len(valid_phrases)
+            else:
+                return False, "No valid phrases in response"
         else:
             return False, "Invalid response format"
-    
+
     except json.JSONDecodeError as e:
-        return False, f"JSON parsing error: {str(e)}\nResponse: {response[:200]}"
+        return False, f"JSON parsing error: {str(e)}\nResponse: {response[:300]}"
     except Exception as e:
         return False, str(e)
 
+
 def check_and_refill_pool(data, threshold=10):
     """Check if phrase pool needs refilling and auto-generate if needed"""
-    available = [p for p in data['phrase_pool'] 
+    available = [p for p in data['phrase_pool']
                  if not any(p['phrase'] == lp['phrase'] for lp in data['learning'])
                  and not any(p['phrase'] == mp['phrase'] for mp in data['mastered'])]
-    
+
     if len(available) < threshold:
         return generate_new_phrases(data, count=5)
-    
+
     return None, None
+
 
 # ============================================================================
 # Streamlit UI
 # ============================================================================
+
+def get_category_color(category):
+    """Return emoji and color for category"""
+    colors = {
+        'Daily': ('🏠', '#4CAF50'),
+        'Business': ('💼', '#2196F3'),
+        'TV Series': ('📺', '#FF9800'),
+        'Social': ('👥', '#E91E63')
+    }
+    return colors.get(category, ('📌', '#9E9E9E'))
+
 
 def main():
     st.set_page_config(
@@ -291,273 +563,268 @@ def main():
         page_icon="📚",
         layout="wide"
     )
-    
-    data = load_data()
-    
+
+    # Initialize session state for cloud storage
+    if 'github_token' not in st.session_state:
+        st.session_state.github_token = ''
+    if 'gist_id' not in st.session_state:
+        st.session_state.gist_id = ''
+
     # Sidebar
     with st.sidebar:
         st.title("⚙️ Settings")
-        
+
+        # Cloud Storage Setup
+        with st.expander("☁️ Cloud Storage (Recommended)", expanded=not st.session_state.github_token):
+            st.markdown("""
+**Why use cloud storage?**
+- 📱 Access from any device
+- 💾 Never lose progress
+- 🔄 Auto-sync
+
+**Setup (2 minutes):**
+1. Get [GitHub Token](https://github.com/settings/tokens)
+2. Scope: Only select `gist`
+3. Paste below
+            """)
+
+            github_token = st.text_input(
+                "GitHub Token",
+                value=st.session_state.github_token,
+                type="password",
+                help="Create at: https://github.com/settings/tokens"
+            )
+
+            gist_id = st.text_input(
+                "Gist ID (Optional)",
+                value=st.session_state.gist_id,
+                help="Leave empty for first use, will auto-create"
+            )
+
+            if st.button("💾 Save & Sync"):
+                if github_token:
+                    st.session_state.github_token = github_token
+                    if gist_id:
+                        st.session_state.gist_id = gist_id
+                    st.success("✅ Cloud storage connected!")
+                    st.rerun()
+                else:
+                    st.error("❌ Please enter GitHub Token")
+
+            if st.session_state.github_token:
+                st.success("✅ Cloud sync enabled")
+                if st.session_state.gist_id:
+                    st.caption(f"Gist: `{st.session_state.gist_id[:8]}...`")
+
+        st.divider()
+
         # API Provider selection
+        data = load_data()
+
         provider = st.selectbox(
             "AI Provider",
             options=["openai", "deepseek"],
             index=0 if data['settings'].get('api_provider', 'openai') == 'openai' else 1,
             help="Choose your AI API provider"
         )
-        
+
         if provider != data['settings'].get('api_provider'):
             data['settings']['api_provider'] = provider
             save_data(data)
-        
+
         # API Key inputs
         if provider == 'openai':
             api_key = st.text_input(
                 "OpenAI API Key",
                 value=data['settings'].get('api_key', ''),
                 type="password",
-                help="Get your key from https://platform.openai.com/api-keys"
+                help="Get from: https://platform.openai.com/api-keys"
             )
             if api_key != data['settings'].get('api_key', ''):
                 data['settings']['api_key'] = api_key
                 save_data(data)
                 st.success("✅ API Key saved!")
-        
+
         elif provider == 'deepseek':
             deepseek_key = st.text_input(
                 "DeepSeek API Key",
                 value=data['settings'].get('deepseek_key', ''),
                 type="password",
-                help="Get your key from https://platform.deepseek.com"
+                help="Get from: https://platform.deepseek.com"
             )
             if deepseek_key != data['settings'].get('deepseek_key', ''):
                 data['settings']['deepseek_key'] = deepseek_key
                 save_data(data)
                 st.success("✅ API Key saved!")
-        
+
         st.divider()
-        
+
         # Phrase pool management
         st.subheader("📦 Phrase Pool")
-        available_count = len([p for p in data['phrase_pool'] 
+        available_count = len([p for p in data['phrase_pool']
                                if not any(p['phrase'] == lp['phrase'] for lp in data['learning'])
                                and not any(p['phrase'] == mp['phrase'] for mp in data['mastered'])])
-        st.metric("Available Phrases", available_count)
-        
-        if st.button("🔄 Generate 5 New Phrases", help="Use AI to create new phrases"):
+        st.metric("Available", available_count)
+
+        if st.button("🔄 Generate 5 New", help="Use AI to create phrases"):
             success, result = generate_new_phrases(data, count=5)
             if success:
-                st.success(f"✅ Added {result} new phrases!")
+                st.success(f"✅ Added {result}!")
                 st.rerun()
             else:
-                st.error(f"❌ Failed: {result}")
-        
+                st.error(f"❌ {result}")
+
         st.divider()
-        
+
         # Quick stats
-        st.metric("🔥 Daily Streak", f"{data['daily_streak']} days")
+        st.metric("🔥 Streak", f"{data['daily_streak']} days")
         st.metric("📖 Learning", len(data['learning']))
         st.metric("✅ Mastered", len(data['mastered']))
-        
-        st.divider()
-        
-        if st.button("🔄 Reset All Data", type="secondary"):
-            if st.checkbox("Are you sure?"):
-                DATA_FILE.unlink(missing_ok=True)
-                st.rerun()
-    
+
     # Main tabs
     tab1, tab2, tab3 = st.tabs(["📚 Today's Learning", "💬 Practice Chat", "📊 Progress"])
-    
-    # ========================================================================
+
     # TAB 1: Daily Learning
-    # ========================================================================
     with tab1:
-        st.title("📚 Today's 5 Phrases")
-        
-        # Auto-refill check
+        st.title("📚 Today's Learning")
+
         refill_result = check_and_refill_pool(data, threshold=10)
         if refill_result[0] is True:
-            st.info(f"🤖 Auto-generated {refill_result[1]} new phrases to keep your pool fresh!")
-        elif refill_result[0] is False:
-            st.warning(f"⚠️ Auto-refill failed: {refill_result[1]}")
-        
-        today_phrases = get_today_phrases(data)
-        
+            st.info(f"🤖 Auto-generated {refill_result[1]} new phrases!")
+
+        col1, col2 = st.columns([3, 1])
+        with col2:
+            learn_mode = st.selectbox(
+                "Phrases/day",
+                options=[5, 10, 15, 20],
+                index=0
+            )
+
+        today_phrases = get_today_phrases(data, count=learn_mode)
+
         if not today_phrases:
-            st.success("🎉 All phrases reviewed for today! Come back tomorrow.")
+            st.success("🎉 All done! Come back tomorrow.")
         else:
-            st.info(f"📌 You have {len(today_phrases)} phrases to study today.")
-            
+            st.info(f"📌 {len(today_phrases)} phrases today")
+
             for i, phrase_data in enumerate(today_phrases, 1):
-                with st.container():
-                    col1, col2 = st.columns([3, 1])
-                    
-                    with col1:
-                        st.subheader(f"{i}. {phrase_data['phrase']}")
-                        st.write(f"**中文：** {phrase_data['chinese']}")
-                        st.write(f"**例句：** {phrase_data['example']}")
-                        
-                        if any(p['phrase'] == phrase_data['phrase'] for p in data['learning']):
-                            phrase_info = next(p for p in data['learning'] if p['phrase'] == phrase_data['phrase'])
-                            review_count = phrase_info.get('review_count', 0)
-                            next_review = phrase_info.get('next_review', 'N/A')
-                            st.caption(f"📅 Review #{review_count + 1} | Next: {next_review}")
-                    
-                    with col2:
-                        if st.button(f"✅ Mark Reviewed", key=f"review_{i}"):
-                            mark_reviewed(data, phrase_data['phrase'])
-                            update_streak(data)
-                            st.success("Reviewed!")
-                            st.rerun()
-                    
-                    st.divider()
-    
-    # ========================================================================
-    # TAB 2: Practice Chat (Real AI)
-    # ========================================================================
+                category = phrase_data.get('category', 'Daily')
+                emoji, color = get_category_color(category)
+
+                col1, col2 = st.columns([3, 1])
+
+                with col1:
+                    st.markdown(f"### {i}. {phrase_data['phrase']} {emoji}")
+                    st.markdown(f"**`{category}`** | **中文：** {phrase_data['chinese']}")
+                    st.write(f"**例句：** {phrase_data['example']}")
+
+                    if any(p['phrase'] == phrase_data['phrase'] for p in data['learning']):
+                        phrase_info = next(p for p in data['learning'] if p['phrase'] == phrase_data['phrase'])
+                        st.caption(
+                            f"📅 Review #{phrase_info.get('review_count', 0) + 1} | Next: {phrase_info.get('next_review', 'N/A')}")
+
+                with col2:
+                    if st.button(f"✅ Done", key=f"review_{i}"):
+                        mark_reviewed(data, phrase_data['phrase'])
+                        update_streak(data)
+                        st.success("Great!")
+                        st.rerun()
+
+                st.divider()
+
+    # TAB 2: Practice Chat
     with tab2:
-        st.title("💬 Immersive Practice")
-        
-        # Check API key
+        st.title("💬 Practice Chat")
+
         provider = data['settings'].get('api_provider', 'openai')
-        has_key = False
-        
-        if provider == 'openai':
-            has_key = bool(data['settings'].get('api_key'))
-        elif provider == 'deepseek':
-            has_key = bool(data['settings'].get('deepseek_key'))
-        
+        has_key = bool(data['settings'].get('api_key' if provider == 'openai' else 'deepseek_key'))
+
         if not has_key:
-            st.warning("⚠️ Please add your API Key in Settings to use the chat feature.")
+            st.warning("⚠️ Add API Key in Settings")
             st.stop()
-        
-        # Get today's keywords
-        today_phrases = get_today_phrases(data)
+
+        today_phrases = get_today_phrases(data, count=5)
         keywords = [p['phrase'] for p in today_phrases[:5]]
-        
+
         if keywords:
-            st.info(f"**Today's Keywords:** {', '.join(keywords)}")
-        
-        # Initialize chat history
+            st.info(f"**Keywords:** {', '.join(keywords)}")
+
         if 'messages' not in st.session_state:
             st.session_state.messages = []
-            # Send initial system message
-            system_msg = f"""You are a friendly English teacher helping a Chinese student practice English.
+            system_msg = f"""You are a friendly English teacher.
 
-Today's target phrases: {', '.join(keywords)}
+Today's phrases: {', '.join(keywords)}
 
-Your role:
-1. Engage in natural conversation
-2. Encourage the student to use today's phrases
-3. If you notice grammar mistakes, point them out gently using this format:
-   "Great! Just a small note: [incorrect part] → [correct form] (explanation)"
-4. Keep responses concise and encouraging
-5. Ask follow-up questions to keep the conversation flowing
+Encourage usage, point out grammar mistakes gently:
+"[incorrect] → [correct] (brief tip)"
 
-Start by greeting the student and mentioning today's phrases."""
-            
-            # Get initial greeting
-            with st.spinner("🤖 AI is preparing..."):
-                initial_response = call_ai_api(data, [
+Keep responses 2-3 sentences."""
+
+            with st.spinner("🤖 Starting..."):
+                initial = call_ai_api(data, [
                     {"role": "system", "content": system_msg},
-                    {"role": "user", "content": "Hi! I'm ready to practice."}
+                    {"role": "user", "content": "Hi!"}
                 ])
-            
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": initial_response
-            })
+
+            st.session_state.messages.append({"role": "assistant", "content": initial})
             st.session_state.system_context = system_msg
-        
-        # Display chat history
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.write(message["content"])
-        
-        # Chat input
-        if prompt := st.chat_input("Type your message..."):
-            # Add user message
+
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
+
+        if prompt := st.chat_input("Type..."):
             st.session_state.messages.append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.write(prompt)
-            
-            # Generate AI response
+
             with st.chat_message("assistant"):
-                with st.spinner("🤔 Thinking..."):
-                    # Build conversation history
-                    api_messages = [
-                        {"role": "system", "content": st.session_state.system_context}
-                    ]
-                    api_messages.extend([
-                        {"role": m["role"], "content": m["content"]}
-                        for m in st.session_state.messages[-10:]  # Last 10 messages for context
-                    ])
-                    
-                    response = call_ai_api(data, api_messages)
-                
+                with st.spinner("🤔"):
+                    api_msgs = [{"role": "system", "content": st.session_state.system_context}]
+                    api_msgs.extend(
+                        [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[-10:]])
+                    response = call_ai_api(data, api_msgs)
+
                 st.write(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
-        
-        # Clear chat button
-        col1, col2 = st.columns([1, 5])
-        with col1:
-            if st.button("🔄 New Chat"):
-                st.session_state.messages = []
-                if 'system_context' in st.session_state:
-                    del st.session_state.system_context
-                st.rerun()
-    
-    # ========================================================================
-    # TAB 3: Progress Dashboard
-    # ========================================================================
+
+        if st.button("🔄 New Chat"):
+            st.session_state.messages = []
+            if 'system_context' in st.session_state:
+                del st.session_state.system_context
+            st.rerun()
+
+    # TAB 3: Progress
     with tab3:
-        st.title("📊 Your Progress")
-        
+        st.title("📊 Progress")
+
         col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("🔥 Current Streak", f"{data['daily_streak']} days")
-        
-        with col2:
-            st.metric("📖 In Progress", len(data['learning']))
-        
-        with col3:
-            st.metric("✅ Mastered", len(data['mastered']))
-        
+        col1.metric("🔥 Streak", f"{data['daily_streak']} days")
+        col2.metric("📖 Learning", len(data['learning']))
+        col3.metric("✅ Mastered", len(data['mastered']))
+
         st.divider()
-        
-        # Pie chart
-        if data['learning'] or data['mastered']:
-            chart_data = pd.DataFrame({
-                'Status': ['Learning', 'Mastered'],
-                'Count': [len(data['learning']), len(data['mastered'])]
-            })
-            st.subheader("📈 Learning Distribution")
-            st.bar_chart(chart_data.set_index('Status'))
-        
-        # Learning list
+
+        if data['phrase_pool']:
+            st.subheader("📈 By Category")
+            cats = {}
+            for p in data['phrase_pool']:
+                cat = p.get('category', 'Daily')
+                cats[cat] = cats.get(cat, 0) + 1
+
+            df = pd.DataFrame({'Category': list(cats.keys()), 'Count': list(cats.values())})
+            st.bar_chart(df.set_index('Category'))
+
         if data['learning']:
-            st.subheader("📚 Phrases in Progress")
-            learning_df = pd.DataFrame([
-                {
-                    'Phrase': p['phrase'],
-                    'Chinese': p['chinese'],
-                    'Reviews': p.get('review_count', 0),
-                    'Next Review': p.get('next_review', 'N/A')
-                }
-                for p in data['learning']
-            ])
-            st.dataframe(learning_df, use_container_width=True)
-        
-        # Mastered list
-        if data['mastered']:
-            st.subheader("✅ Mastered Phrases")
-            mastered_df = pd.DataFrame([
-                {'Phrase': p['phrase'], 'Chinese': p['chinese']}
-                for p in data['mastered']
-            ])
-            st.dataframe(mastered_df, use_container_width=True)
+            st.subheader("📚 In Progress")
+            df = pd.DataFrame([{
+                'Phrase': p['phrase'],
+                'Category': p.get('category', 'Daily'),
+                'Reviews': p.get('review_count', 0),
+                'Next': p.get('next_review', 'N/A')
+            } for p in data['learning']])
+            st.dataframe(df, use_container_width=True)
+
 
 if __name__ == "__main__":
     main()
