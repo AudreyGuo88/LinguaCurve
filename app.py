@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 import requests
 import time
+import copy
 
 
 # ============================================================================
@@ -383,6 +384,41 @@ def update_streak(data):
         data['last_study_date'] = today
         save_data(data)
 
+
+def save_data(data):
+    """Save data to Gist (NEVER save API keys)"""
+
+    # 创建深拷贝并清除所有敏感信息
+    data_to_save = copy.deepcopy(data)
+
+    # 强制清空所有 API Keys
+    if 'settings' in data_to_save:
+        data_to_save['settings']['api_key'] = ''
+        data_to_save['settings']['deepseek_key'] = ''
+
+    # 保存到本地文件
+    try:
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        st.error(f"⚠️ Local save failed: {e}")
+
+    # 保存到 Gist
+    github_token = st.session_state.get('github_token', '')
+    gist_id = st.session_state.get('gist_id', '')
+
+    if not github_token:
+        return
+
+    storage = GistStorage(github_token, gist_id)
+    success, error = storage.update_gist(data_to_save)
+
+    if success:
+        if not gist_id and storage.gist_id:
+            st.session_state.gist_id = storage.gist_id
+            st.success(f"✅ Gist created! ID: {storage.gist_id}")
+    elif error:
+        st.warning(f"⚠️ Cloud sync failed: {error}")
 
 # ============================================================================
 # AI API Integration
