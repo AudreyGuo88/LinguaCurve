@@ -725,6 +725,22 @@ def main():
         st.metric("🔥 Streak", f"{data['daily_streak']} days")
         st.metric("📖 Learning", len(data['learning']))
         st.metric("✅ Mastered", len(data['mastered']))
+        
+        st.divider()
+        st.subheader("🔄 Reset")
+
+        if st.button("🗑️ Delete Local Data", type="secondary"):
+            # 删除本地文件
+            if DATA_FILE.exists():
+                DATA_FILE.unlink()
+                st.success("✅ Local file deleted")
+
+            # 清空 session state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+
+            st.warning("⚠️ Please refresh the page")
+            st.info("Next save will create a fresh Gist")
 
     # Main tabs
     tab1, tab2, tab3 = st.tabs(["📚 Today's Learning", "💬 Practice Chat", "📊 Progress"])
