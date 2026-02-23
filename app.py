@@ -261,6 +261,13 @@ def save_data(data):
     github_token = st.session_state.get('github_token', '')
     gist_id = st.session_state.get('gist_id', '')
 
+    # 🔍 调试信息
+    if not github_token:
+        st.warning("🔍 Debug: No GitHub token found in session state")
+        return
+
+    st.info(f"🔍 Debug: Attempting to save to Gist... (has token: {bool(github_token)}, has gist_id: {bool(gist_id)})")
+
     if github_token:
         storage = GistStorage(github_token, gist_id)
         success, error = storage.update_gist(data)
@@ -268,9 +275,11 @@ def save_data(data):
         if success:
             if not gist_id and storage.gist_id:
                 st.session_state.gist_id = storage.gist_id
-        elif error:
-            # Silently fail in production
-            pass
+                st.success(f"✅ Gist created successfully! ID: {storage.gist_id}")
+                st.info(f"🔗 View at: https://gist.github.com/{storage.gist_id}")
+        else:
+            # 显示详细错误（调试用）
+            st.error(f"❌ Gist save failed: {error}")
 
 
 def get_today_phrases(data, count=5):
