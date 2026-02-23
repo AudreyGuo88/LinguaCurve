@@ -248,44 +248,57 @@ def load_data():
     return initial_data
 
 
-def save_data(data):
-    """Save data to Gist (NEVER save API keys)"""
+def load_data():
+    """Load data from Gist or create new"""
+    # 从 secrets 加载配置
+    secrets = load_secrets()
 
-    # 🔒 关键：创建深拷贝并清除所有敏感信息
-    import copy
-    data_to_save = copy.deepcopy(data)
-
-    # 强制清空所有 API Keys
-    if 'settings' in data_to_save:
-        data_to_save['settings']['api_key'] = ''
-        data_to_save['settings']['deepseek_key'] = ''
-
-    # 保存到本地文件（备份，也是清理后的）
-    try:
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data_to_save, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        st.error(f"⚠️ Local save failed: {e}")
-
-    # 保存到 Gist（使用清理后的数据）
+    # 尝试从云端加载
     github_token = st.session_state.get('github_token', '')
     gist_id = st.session_state.get('gist_id', '')
 
-    if not github_token:
-        return
+    if github_token and gist_id:
+        storage = GistStorage(github_token, gist_id)
+        data, error = storage.read_gist()
 
-    # 🔍 调试信息
-    st.info(f"🔍 Saving to Gist... (api_key in data_to_save: {bool(data_to_save.get('settings', {}).get('api_key'))})")
+        if data:
+            # 🔒 强制从 Secrets 覆盖 API keys（永远不从 Gist 读取）
+            if 'settings' not in data:
+                data['settings'] = {}
 
-    storage = GistStorage(github_token, gist_id)
-    success, error = storage.update_gist(data_to_save)  # 使用清理后的数据
+            # 从 Secrets 加载（覆盖任何 Gist 中的值）
+            data['settings']['api_key'] = secrets.get('openai_key', '')
+            data['settings']['deepseek_key'] = secrets.get('deepseek_key', '')
+            data['settings']['api_provider'] = data['settings'].get('api_provider', 'openai')
 
-    if success:
-        if not gist_id and storage.gist_id:
-            st.session_state.gist_id = storage.gist_id
-            st.success(f"✅ Gist created! ID: {storage.gist_id}")
-    elif error:
-        st.warning(f"⚠️ Cloud sync failed: {error}")
+            # 迁移：添加 category 字段
+            for phrase in data.get('phrase_pool', []):
+                if 'category' not in phrase:
+                    phrase['category'] = 'Daily'
+            for phrase in data.get('learning', []):
+                if 'category' not in phrase:
+                    phrase['category'] = 'Daily'
+            for phrase in data.get('mastered', []):
+                if 'category' not in phrase:
+                    phrase['category'] = 'Daily'
+
+            return data
+
+    # 如果没有 Gist，创建全新数据
+    initial_data = {
+        "phrase_pool": DEFAULT_PHRASE_POOL,
+        "learning": [],
+        "mastered": [],
+        "daily_streak": 0,
+        "last_study_date": None,
+        "settings": {
+            "api_key": secrets.get('openai_key', ''),  # 只从 Secrets 加载
+            "api_provider": "openai",
+            "deepseek_key": secrets.get('deepseek_key', '')
+        }
+    }
+
+    return initial_data
 
 
 def get_today_phrases(data, count=5):
