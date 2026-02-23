@@ -457,52 +457,54 @@ def generate_new_phrases(data, count=5):
 
 # CRITICAL REQUIREMENTS:
 
-## 1. SOURCE PRIORITY (Ranked by importance):
-- **Tier 1**: Phrases from popular TV series (Friends, Modern Family, The Office, How I Met Your Mother, Brooklyn Nine-Nine)
-- **Tier 2**: Common workplace/office expressions used in meetings, emails, presentations
-- **Tier 3**: Social gathering phrases (parties, dating, small talk, making friends)
-- **Tier 4**: Daily life essentials (shopping, dining, transportation)
+## 1. SOURCE PRIORITY:
+- **Tier 1**: Popular TV series (Friends, Modern Family, The Office)
+- **Tier 2**: Workplace/office expressions
+- **Tier 3**: Social gathering phrases
+- **Tier 4**: Daily life essentials
 
 ## 2. VOCABULARY CONSTRAINTS:
-- MUST use ONLY words from COCA (Corpus of Contemporary American English) top 5000 high-frequency words
-- STRICTLY FORBIDDEN: Literary/archaic/academic/formal vocabulary
-- MUST sound natural when spoken by native speakers in casual contexts
+- MUST use ONLY COCA top 5000 high-frequency words
+- STRICTLY FORBIDDEN: Literary/archaic/academic vocabulary
 - Think: "Would a character in Friends say this?"
 
 ## 3. DIFFICULTY LEVEL:
-- Lock difficulty at CEFR B1-B2 level (intermediate)
-- Phrases should be challenging enough to learn but not intimidating
+- CEFR B1-B2 level (intermediate)
 
 ## 4. CATEGORY CLASSIFICATION:
-Each phrase MUST be tagged with ONE category:
-- **Daily**: Everyday life, routine activities, personal matters
-- **Business**: Workplace, meetings, professional communication, career
-- **TV Series**: Phrases popularized by American TV shows
-- **Social**: Parties, dating, friendships, casual gatherings
+- **Daily**: Everyday life
+- **Business**: Workplace
+- **TV Series**: Pop culture
+- **Social**: Social gatherings
 
 ## 5. QUALITY STANDARDS:
-- Phrase must be 2-6 words long
-- Example sentence must demonstrate NATURAL usage
-- Chinese translation must be colloquial and accurate
+- Phrase: 2-6 words
+- Natural example sentence
+- Colloquial Chinese translation
 
-# OUTPUT FORMAT:
-Return ONLY valid JSON array with NO markdown:
+# CRITICAL OUTPUT RULES:
+Return ONLY a valid JSON array. NO markdown, NO explanations, NO code blocks.
 
+Start directly with [ and end with ]
+
+Format:
 [
   {
     "phrase": "grab a bite",
-    "chinese": "随便吃点东西",
+    "chinese": "随便吃点",
     "example": "Want to grab a bite after work?",
     "category": "Daily"
   }
-]"""
+]
+
+DO NOT include ```json or any other text."""
 
     existing_phrases = [p['phrase'] for p in data['phrase_pool']]
     user_prompt = f"""Generate exactly {count} NEW high-frequency English phrases.
 
-AVOID: {', '.join(existing_phrases[:30])}
+AVOID these: {', '.join(existing_phrases[:30])}
 
-Return pure JSON array only."""
+Return ONLY the JSON array. No markdown, no explanations."""
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -512,14 +514,44 @@ Return pure JSON array only."""
     with st.spinner("🤖 Generating..."):
         response = call_ai_api(data, messages)
 
+    # Check if response is an error message
+    if response.startswith("❌") or response.startswith("⚠️"):
+        return False, response
+
     try:
-        response = response.strip()
-        if response.startswith("```"):
-            response = response.split("```")[1]
-            if response.startswith("json"):
-                response = response[4:]
+        # 🔍 Show raw response for debugging
+        with st.expander("🔍 Debug: AI Response"):
+            st.code(response[:800], language=None)
+
+        # Clean response
         response = response.strip()
 
+        # Remove markdown code blocks
+        if "```" in response:
+            parts = response.split("```")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("json"):
+                    response = part[4:].strip()
+                    break
+                elif part and "[" in part:
+                    try:
+                        json.loads(part)
+                        response = part
+                        break
+                    except:
+                        continue
+
+        # Extract JSON array
+        start_idx = response.find('[')
+        end_idx = response.rfind(']')
+
+        if start_idx != -1 and end_idx != -1:
+            response = response[start_idx:end_idx + 1]
+
+        response = response.strip()
+
+        # Parse JSON
         new_phrases = json.loads(response)
 
         if isinstance(new_phrases, list) and len(new_phrases) > 0:
@@ -535,13 +567,17 @@ Return pure JSON array only."""
                 save_data(data)
                 return True, len(valid_phrases)
             else:
-                return False, "No valid phrases"
+                return False, "No valid phrases in response"
         else:
-            return False, "Invalid format"
+            return False, "Response is not a JSON array"
 
     except json.JSONDecodeError as e:
+        st.error(f"❌ JSON Parse Error at position {e.pos}")
+        st.error("Response content:")
+        st.code(response[:1000], language=None)
         return False, f"Parse error: {str(e)}"
     except Exception as e:
+        st.error(f"❌ Unexpected error: {str(e)}")
         return False, str(e)
 
 
