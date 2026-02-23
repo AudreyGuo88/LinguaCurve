@@ -249,37 +249,43 @@ def load_data():
 
 
 def save_data(data):
-    """Save data to both Gist and local file"""
-    # Save to local file (backup)
+    """Save data to Gist (NEVER save API keys)"""
+
+    # 🔒 关键：创建深拷贝并清除所有敏感信息
+    import copy
+    data_to_save = copy.deepcopy(data)
+
+    # 强制清空所有 API Keys
+    if 'settings' in data_to_save:
+        data_to_save['settings']['api_key'] = ''
+        data_to_save['settings']['deepseek_key'] = ''
+
+    # 保存到本地文件（备份，也是清理后的）
     try:
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(data_to_save, f, ensure_ascii=False, indent=2)
     except Exception as e:
         st.error(f"⚠️ Local save failed: {e}")
 
-    # Save to Gist (cloud)
+    # 保存到 Gist（使用清理后的数据）
     github_token = st.session_state.get('github_token', '')
     gist_id = st.session_state.get('gist_id', '')
 
-    # 🔍 调试信息
     if not github_token:
-        st.warning("🔍 Debug: No GitHub token found in session state")
         return
 
-    st.info(f"🔍 Debug: Attempting to save to Gist... (has token: {bool(github_token)}, has gist_id: {bool(gist_id)})")
+    # 🔍 调试信息
+    st.info(f"🔍 Saving to Gist... (api_key in data_to_save: {bool(data_to_save.get('settings', {}).get('api_key'))})")
 
-    if github_token:
-        storage = GistStorage(github_token, gist_id)
-        success, error = storage.update_gist(data)
+    storage = GistStorage(github_token, gist_id)
+    success, error = storage.update_gist(data_to_save)  # 使用清理后的数据
 
-        if success:
-            if not gist_id and storage.gist_id:
-                st.session_state.gist_id = storage.gist_id
-                st.success(f"✅ Gist created successfully! ID: {storage.gist_id}")
-                st.info(f"🔗 View at: https://gist.github.com/{storage.gist_id}")
-        else:
-            # 显示详细错误（调试用）
-            st.error(f"❌ Gist save failed: {error}")
+    if success:
+        if not gist_id and storage.gist_id:
+            st.session_state.gist_id = storage.gist_id
+            st.success(f"✅ Gist created! ID: {storage.gist_id}")
+    elif error:
+        st.warning(f"⚠️ Cloud sync failed: {error}")
 
 
 def get_today_phrases(data, count=5):
@@ -725,7 +731,7 @@ def main():
         st.metric("🔥 Streak", f"{data['daily_streak']} days")
         st.metric("📖 Learning", len(data['learning']))
         st.metric("✅ Mastered", len(data['mastered']))
-        
+
         st.divider()
         st.subheader("🔄 Reset")
 
