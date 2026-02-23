@@ -1,0 +1,88 @@
+{
+  "phrase_pool": [
+    {
+      "phrase": "break the ice",
+      "chinese": "打破僵局",
+      "example": "Let me tell a joke to break the ice."
+    },
+    {
+      "phrase": "hit the nail on the head",
+      "chinese": "一针见血",
+      "example": "Your analysis hit the nail on the head."
+    },
+    {
+      "phrase": "piece of cake",
+      "chinese": "小菜一碟",
+      "example": "This test was a piece of cake!"
+    },
+    {
+      "phrase": "under the weather",
+      "chinese": "身体不适",
+      "example": "I'm feeling under the weather today."
+    },
+    {
+      "phrase": "call it a day",
+      "chinese": "收工",
+      "example": "Let's call it a day and go home."
+    },
+    {
+      "phrase": "bite the bullet",
+      "chinese": "硬着头皮做",
+      "example": "I had to bite the bullet and apologize."
+    },
+    {
+      "phrase": "on cloud nine",
+      "chinese": "非常高兴",
+      "example": "She was on cloud nine after getting promoted."
+    },
+    {
+      "phrase": "spill the beans",
+      "chinese": "泄露秘密",
+      "example": "Don't spill the beans about the surprise party!"
+    },
+    {
+      "phrase": "cost an arm and a leg",
+      "chinese": "非常昂贵",
+      "example": "That new car cost him an arm and a leg."
+    },
+    {
+      "phrase": "the ball is in your court",
+      "chinese": "该你做决定了",
+      "example": "I've made my offer, now the ball is in your court."
+    },
+    {
+      "phrase": "beat around the bush",
+      "chinese": "拐弯抹角",
+      "example": "Stop beating around the bush and tell me the truth."
+    },
+    {
+      "phrase": "let the cat out of the bag",
+      "chinese": "泄露秘密",
+      "example": "He let the cat out of the bag about the promotion."
+    },
+    {
+      "phrase": "once in a blue moon",
+      "chinese": "千载难逢",
+      "example": "We only see each other once in a blue moon."
+    },
+    {
+      "phrase": "get cold feet",
+      "chinese": "临阵退缩",
+      "example": "He got cold feet before the wedding."
+    },
+    {
+      "phrase": "when pigs fly",
+      "chinese": "不可能",
+      "example": "He'll clean his room when pigs fly."
+    }
+  ],
+  "learning": [],
+  "mastered": [],
+  "daily_streak": 0,
+  "last_study_date": null,
+  "settings": {
+    "api_key": "sk-proj-JxKlrAoyZVcPfXbBmgvZT3BlbkFJeW2mYbw4ZHW3aomzyeFt",
+    "api_provider": "openai",
+    "deepseek_key": ""
+  }
+}
