@@ -607,6 +607,15 @@ def get_category_color(category):
     return colors.get(category, '📌')
 
 
+def get_phrase_data(data, phrase_text):
+    """Look up full phrase data from any list."""
+    for source in ('learning', 'mastered', 'dismissed', 'phrase_pool'):
+        for p in data.get(source, []):
+            if p['phrase'] == phrase_text:
+                return p
+    return None
+
+
 def get_proficiency_icon(review_count, is_mastered=False):
     """Return growth stage icon based on review progress"""
     if is_mastered:
@@ -984,9 +993,13 @@ def main():
         if not today_phrases:
             st.success("🎉 All done for today! Come back tomorrow.")
         else:
-            done_count = len(st.session_state.reviewed_today)
+            # Split into pending vs learned today
+            pending_phrases = [p for p in today_phrases if p['phrase'] not in st.session_state.reviewed_today]
+            learned_phrases = [p['phrase'] for p in today_phrases if p['phrase'] in st.session_state.reviewed_today]
+
+            done_count = len(learned_phrases)
             total_count_t1 = len(today_phrases)
-            pct = done_count / total_count_t1 if total_count_t1 > 0 else 0.0
+            pct = min(done_count / total_count_t1, 1.0) if total_count_t1 > 0 else 0.0
             progress_emoji = (
                 "🎉" if pct >= 1.0 else
                 "🔥" if pct >= 0.75 else
@@ -1007,43 +1020,26 @@ def main():
                     st.session_state.reveal_all = False
                     st.rerun()
 
-            for i, phrase_data in enumerate(today_phrases, 1):
-                phrase_text = phrase_data['phrase']
-                category = phrase_data.get('category', 'Daily')
-                cat_emoji = get_category_color(category)
+            # ── Section 1: Up Next ─────────────────────────────────────────
+            if pending_phrases:
+                st.markdown(f"#### 📋 Up Next — {len(pending_phrases)} remaining")
+                for phrase_data in pending_phrases:
+                    phrase_text = phrase_data['phrase']
+                    safe_key = phrase_text.replace(' ', '_').replace("'", '').replace('"', '')
+                    category = phrase_data.get('category', 'Daily')
+                    cat_emoji = get_category_color(category)
 
-                # Determine proficiency level
-                is_mastered = any(p['phrase'] == phrase_text for p in data['mastered'])
-                learning_info = next(
-                    (p for p in data['learning'] if p['phrase'] == phrase_text), None
-                )
-                review_count = learning_info.get('review_count', 0) if learning_info else 0
-                proficiency_icon = get_proficiency_icon(review_count, is_mastered)
-                already_done = phrase_text in st.session_state.reviewed_today
+                    is_mastered = any(p['phrase'] == phrase_text for p in data['mastered'])
+                    learning_info = next(
+                        (p for p in data['learning'] if p['phrase'] == phrase_text), None
+                    )
+                    review_count = learning_info.get('review_count', 0) if learning_info else 0
+                    proficiency_icon = get_proficiency_icon(review_count, is_mastered)
 
-                # ── Phrase Card (Material-style) ──────────────────────────────
-                with st.container(border=True):
+                    with st.container(border=True):
+                        header_col, action_col = st.columns([4, 1])
 
-                    # Invisible marker for CSS :has() done-card styling
-                    if already_done:
-                        st.markdown(
-                            '<span class="done-card-marker" style="display:none"></span>',
-                            unsafe_allow_html=True
-                        )
-
-                    header_col, action_col = st.columns([4, 1])
-
-                    with header_col:
-                        if already_done:
-                            # Strikethrough title + Completed + category badge in one block
-                            st.markdown(
-                                f'<h3 style="text-decoration:line-through;color:#9ca3af;'
-                                f'margin-bottom:6px;">{proficiency_icon} {phrase_text}</h3>'
-                                f'<span class="done-badge">✅ Completed</span>'
-                                f'<span class="cat-badge">{cat_emoji} {category}</span>',
-                                unsafe_allow_html=True
-                            )
-                        else:
+                        with header_col:
                             st.markdown(f"### {proficiency_icon} {phrase_text}")
                             st.markdown(
                                 f'<span class="cat-badge">{cat_emoji} {category}</span>',
@@ -1053,14 +1049,11 @@ def main():
                                 next_rev = phrase_data.get('next_review', '?')
                                 st.caption(f"Review #{review_count + 1} · next: {next_rev}")
 
-                    with action_col:
-                        st.write("")  # vertical breathing room
-                        if already_done:
-                            st.write("✅")
-                        else:
+                        with action_col:
+                            st.write("")
                             if st.button(
                                 "✅ Mark Done",
-                                key=f"review_{i}",
+                                key=f"review_{safe_key}",
                                 type="primary"
                             ):
                                 mark_reviewed(data, phrase_text)
@@ -1068,41 +1061,72 @@ def main():
                                 st.session_state.reviewed_today.add(phrase_text)
                                 st.session_state.just_reviewed = True
                                 st.rerun()
-                        if st.button(
-                            "⭐ I Know This",
-                            key=f"dismiss_{i}",
-                            help="I've fully mastered this — remove it from the review schedule",
-                            type="secondary"
+                            if st.button(
+                                "⭐ I Know This",
+                                key=f"dismiss_{safe_key}",
+                                help="I've fully mastered this — remove it from the review schedule",
+                                type="secondary"
+                            ):
+                                dismiss_phrase(data, phrase_text)
+                                st.session_state.reviewed_today.discard(phrase_text)
+                                st.rerun()
+
+                        with st.expander(
+                            "🧠 Reveal: Translation & Example",
+                            expanded=st.session_state.reveal_all
                         ):
-                            dismiss_phrase(data, phrase_text)
-                            st.session_state.reviewed_today.discard(phrase_text)
-                            st.rerun()
+                            st.markdown(f"**🇨🇳 Chinese:** {phrase_data['chinese']}")
+                            st.markdown(
+                                f"**✍️ Example：**  \n> *{phrase_data['example']}*"
+                            )
 
-                    # ── Active Recall: hidden by default, Reveal All overrides ─
+                        tts_col, _ = st.columns([1, 3])
+                        with tts_col:
+                            if TTS_AVAILABLE:
+                                tts_key = f'show_audio_{safe_key}'
+                                if st.button("🔊 Listen", key=f"tts_btn_{safe_key}"):
+                                    st.session_state[tts_key] = not st.session_state.get(tts_key, False)
+                                if st.session_state.get(tts_key, False):
+                                    audio_bytes = get_tts_audio(phrase_text)
+                                    if audio_bytes:
+                                        st.audio(audio_bytes, format='audio/mp3')
+                                    else:
+                                        st.caption("TTS failed — check internet connection")
+                            else:
+                                st.caption("💡 `pip install gTTS` to enable pronunciation")
+
+            # ── Section 2: Learned Today ───────────────────────────────────
+            if learned_phrases:
+                st.markdown(f"#### ✅ Learned Today — {len(learned_phrases)}")
+                for phrase_text in learned_phrases:
+                    pd_full = get_phrase_data(data, phrase_text)
+                    if pd_full is None:
+                        continue
+                    safe_key = phrase_text.replace(' ', '_').replace("'", '').replace('"', '')
+                    category = pd_full.get('category', 'Daily')
+                    cat_emoji = get_category_color(category)
+                    is_mastered = any(p['phrase'] == phrase_text for p in data['mastered'])
+                    review_count = pd_full.get('review_count', 0)
+                    proficiency_icon = get_proficiency_icon(review_count, is_mastered)
+
                     with st.expander(
-                        "🧠 Reveal: Translation & Example",
-                        expanded=st.session_state.reveal_all
+                        f"{proficiency_icon} {phrase_text}  ✅",
+                        expanded=False
                     ):
-                        st.markdown(f"**🇨🇳 Chinese:** {phrase_data['chinese']}")
                         st.markdown(
-                            f"**✍️ Example：**  \n> *{phrase_data['example']}*"
+                            f'<span class="cat-badge">{cat_emoji} {category}</span>',
+                            unsafe_allow_html=True
                         )
-
-                    # ── TTS pronunciation ─────────────────────────────────────
-                    tts_col, _ = st.columns([1, 3])
-                    with tts_col:
+                        st.markdown(f"**🇨🇳 Chinese:** {pd_full['chinese']}")
+                        st.markdown(f"**✍️ Example：**  \n> *{pd_full['example']}*")
                         if TTS_AVAILABLE:
-                            tts_key = f'show_audio_{i}'
-                            if st.button("🔊 Listen", key=f"tts_btn_{i}"):
-                                st.session_state[tts_key] = not st.session_state.get(tts_key, False)
-                            if st.session_state.get(tts_key, False):
+                            tts_key2 = f'show_audio_done_{safe_key}'
+                            if st.button("🔊 Listen", key=f"tts_done_{safe_key}"):
+                                st.session_state[tts_key2] = not st.session_state.get(tts_key2, False)
+                            if st.session_state.get(tts_key2, False):
                                 audio_bytes = get_tts_audio(phrase_text)
                                 if audio_bytes:
                                     st.audio(audio_bytes, format='audio/mp3')
-                                else:
-                                    st.caption("TTS failed — check internet connection")
-                        else:
-                            st.caption("💡 `pip install gTTS` to enable pronunciation")
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # DAILY CHALLENGE MODULE
