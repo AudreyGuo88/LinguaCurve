@@ -803,8 +803,6 @@ def main():
     # ── Session state initialisation ─────────────────────────────────────────
     if 'reviewed_today' not in st.session_state:
         st.session_state.reviewed_today = set()
-    if 'just_reviewed' not in st.session_state:
-        st.session_state.just_reviewed = False
     if 'learn_mode' not in st.session_state:
         st.session_state.learn_mode = 5
     if 'challenge_data' not in st.session_state:
@@ -815,14 +813,16 @@ def main():
         st.session_state.reveal_all = False
     if 'confirm_delete' not in st.session_state:
         st.session_state.confirm_delete = False
+    if 'celebration_fired' not in st.session_state:
+        st.session_state.celebration_fired = False
+    # Tracks which of today's phrases were brand-new vs already in SRS
+    if 'session_new_phrases' not in st.session_state:
+        st.session_state.session_new_phrases = set()
+    if 'session_review_phrases' not in st.session_state:
+        st.session_state.session_review_phrases = set()
 
     # ── Load data (once, shared by all tabs) ─────────────────────────────────
     data = load_data()
-
-    # ── Balloons celebration (fires after any ✅ review) ─────────────────────
-    if st.session_state.just_reviewed:
-        st.balloons()
-        st.session_state.just_reviewed = False
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # SIDEBAR
@@ -922,6 +922,16 @@ def main():
         else:
             st.progress(1.0, text="🎉 All done!")
 
+        # ── Categorise today's phrases (new vs review) — updates incrementally ─
+        current_learning_set = {p['phrase'] for p in data['learning']}
+        seen = st.session_state.session_new_phrases | st.session_state.session_review_phrases
+        for p in today_phrases_sidebar:
+            if p['phrase'] not in seen:
+                if p['phrase'] in current_learning_set:
+                    st.session_state.session_review_phrases.add(p['phrase'])
+                else:
+                    st.session_state.session_new_phrases.add(p['phrase'])
+
         st.divider()
 
         # ── Phrase pool ──
@@ -941,8 +951,47 @@ def main():
                     st.error(f"❌ {result}")
 
         st.divider()
-        st.metric("📖 Learning", len(data['learning']))
-        st.metric("✅ Mastered", len(data['mastered']))
+
+        # ── 4-item navigation library ──────────────────────────────────────────
+
+        # 1. In Progress
+        with st.expander(f"📖 In Progress ({len(data['learning'])})"):
+            for p in sorted(data['learning'], key=lambda x: x.get('next_review', '')):
+                st.markdown(f"**{p['phrase']}**  \n{p['chinese']}")
+
+        # 2. Mastered
+        mastered_all = data['mastered'] + data.get('dismissed', [])
+        with st.expander(f"✅ Mastered ({len(mastered_all)})"):
+            for p in mastered_all:
+                st.markdown(f"**{p['phrase']}**  \n{p['chinese']}")
+
+        # 3. New Today — brand-new phrases introduced today
+        new_today_list = [
+            get_phrase_data(data, pt)
+            for pt in st.session_state.session_new_phrases
+            if any(pt == sp['phrase'] for sp in today_phrases_sidebar)
+        ]
+        new_today_list = [p for p in new_today_list if p is not None]
+        new_done_count = sum(1 for p in new_today_list if p['phrase'] in st.session_state.reviewed_today)
+        with st.expander(f"🌱 New Today ({new_done_count}/{len(new_today_list)})"):
+            for p in new_today_list:
+                done_mark = " ✅" if p['phrase'] in st.session_state.reviewed_today else ""
+                st.markdown(f"**{p['phrase']}**{done_mark}  \n{p['chinese']}")
+                st.caption(f"> {p['example']}")
+
+        # 4. Reviewed Today — SRS-due phrases revisited today
+        rev_today_list = [
+            get_phrase_data(data, pt)
+            for pt in st.session_state.session_review_phrases
+            if any(pt == sp['phrase'] for sp in today_phrases_sidebar)
+        ]
+        rev_today_list = [p for p in rev_today_list if p is not None]
+        rev_done_count = sum(1 for p in rev_today_list if p['phrase'] in st.session_state.reviewed_today)
+        with st.expander(f"🔁 Reviewed Today ({rev_done_count}/{len(rev_today_list)})"):
+            for p in rev_today_list:
+                done_mark = " ✅" if p['phrase'] in st.session_state.reviewed_today else ""
+                st.markdown(f"**{p['phrase']}**{done_mark}  \n{p['chinese']}")
+                st.caption(f"> {p['example']}")
 
         st.divider()
         st.subheader("🔄 Reset")
@@ -1009,6 +1058,11 @@ def main():
             )
             st.progress(pct, text=f"{progress_emoji}  {done_count} / {total_count_t1} phrases completed")
 
+            # ── 🎉 Fire celebration when all phrases done (once per session) ─
+            if pct >= 1.0 and total_count_t1 > 0 and not st.session_state.celebration_fired:
+                st.balloons()
+                st.session_state.celebration_fired = True
+
             # ── Bulk reveal/hide controls ──────────────────────────────────
             reveal_col, hide_col, _ = st.columns([1, 1, 5])
             with reveal_col:
@@ -1059,7 +1113,6 @@ def main():
                                 mark_reviewed(data, phrase_text)
                                 update_streak(data)
                                 st.session_state.reviewed_today.add(phrase_text)
-                                st.session_state.just_reviewed = True
                                 st.rerun()
                             if st.button(
                                 "⭐ I Know This",
