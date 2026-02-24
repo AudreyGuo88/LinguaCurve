@@ -1,0 +1,6 @@
+learning_data.json
+*.pyc
+__pycache__/
+.env
+.streamlit/secrets.toml
+venv/
