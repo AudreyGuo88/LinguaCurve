@@ -87,6 +87,7 @@ For Streamlit Cloud deployments, add secrets in the dashboard:
 GITHUB_TOKEN = "ghp_..."
 GIST_ID = "abc123..."          # leave blank on first run
 OPENAI_API_KEY = "sk-..."      # or use DEEPSEEK_API_KEY
+OWNER_PASSWORD = "yourpassword"  # required for owner login
 ```
 
 ---

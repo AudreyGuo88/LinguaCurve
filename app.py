@@ -31,6 +31,7 @@ def load_secrets():
             secrets['openai_key'] = st.secrets.get("OPENAI_API_KEY", "")
             secrets['deepseek_key'] = st.secrets.get("DEEPSEEK_API_KEY", "")
             secrets['gist_id'] = st.secrets.get("GIST_ID", "")
+            secrets['owner_password'] = st.secrets.get("OWNER_PASSWORD", "")
     except Exception:
         pass
 
@@ -182,9 +183,9 @@ def load_data():
             if 'settings' not in data:
                 data['settings'] = {}
 
-            # 🔒 Force load API keys from Secrets (never from Gist)
-            data['settings']['api_key'] = secrets.get('openai_key', '')
-            data['settings']['deepseek_key'] = secrets.get('deepseek_key', '')
+            # Keys are never loaded from Gist; injected at runtime based on auth
+            data['settings']['api_key'] = ''
+            data['settings']['deepseek_key'] = ''
             data['settings']['api_provider'] = data['settings'].get('api_provider', 'openai')
 
             # Migrate: add category field
@@ -212,9 +213,9 @@ def load_data():
         "daily_streak": 0,
         "last_study_date": None,
         "settings": {
-            "api_key": secrets.get('openai_key', ''),
+            "api_key": "",
             "api_provider": "openai",
-            "deepseek_key": secrets.get('deepseek_key', '')
+            "deepseek_key": ""
         }
     }
 
@@ -354,13 +355,18 @@ def update_streak(data):
 
 
 def save_data(data):
-    """Save data to Gist (NEVER save API keys)"""
+    """Save data to Gist/file (owner) or session state only (guest)."""
     data_to_save = copy.deepcopy(data)
-
     if 'settings' in data_to_save:
         data_to_save['settings']['api_key'] = ''
         data_to_save['settings']['deepseek_key'] = ''
 
+    # ── Guest mode: keep data in session only, never write to disk / Gist ────
+    if not st.session_state.get('owner_authenticated', False):
+        st.session_state.guest_data = data_to_save
+        return
+
+    # ── Owner mode: persist to local file and Gist ────────────────────────────
     try:
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data_to_save, f, ensure_ascii=False, indent=2)
@@ -816,6 +822,12 @@ def main():
         st.session_state.confirm_delete = False
     if 'celebration_fired' not in st.session_state:
         st.session_state.celebration_fired = False
+    if 'owner_authenticated' not in st.session_state:
+        st.session_state.owner_authenticated = False
+    if 'guest_openai_key' not in st.session_state:
+        st.session_state.guest_openai_key = ''
+    if 'guest_deepseek_key' not in st.session_state:
+        st.session_state.guest_deepseek_key = ''
     if 'nav_to_tab' not in st.session_state:
         st.session_state.nav_to_tab = None
     # Tracks which of today's phrases were brand-new vs already in SRS
@@ -824,14 +836,62 @@ def main():
     if 'session_review_phrases' not in st.session_state:
         st.session_state.session_review_phrases = set()
 
-    # ── Load data (once, shared by all tabs) ─────────────────────────────────
-    data = load_data()
+    # ── Load data ─────────────────────────────────────────────────────────────
+    if st.session_state.owner_authenticated:
+        # Owner: real persistent data from file / Gist
+        data = load_data()
+    else:
+        # Guest: isolated in-memory data, never touches owner's storage
+        if 'guest_data' not in st.session_state:
+            st.session_state.guest_data = {
+                "phrase_pool": copy.deepcopy(DEFAULT_PHRASE_POOL),
+                "learning": [],
+                "mastered": [],
+                "dismissed": [],
+                "daily_streak": 0,
+                "last_study_date": None,
+                "settings": {"api_key": "", "api_provider": "openai", "deepseek_key": ""}
+            }
+        data = st.session_state.guest_data
+
+    # ── Inject API keys based on auth state (never from saved data) ──────────
+    if st.session_state.owner_authenticated:
+        data['settings']['api_key'] = secrets.get('openai_key', '')
+        data['settings']['deepseek_key'] = secrets.get('deepseek_key', '')
+    else:
+        # Use guest-supplied keys (stored in session state, not persisted)
+        data['settings']['api_key'] = st.session_state.guest_openai_key
+        data['settings']['deepseek_key'] = st.session_state.guest_deepseek_key
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # SIDEBAR
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     with st.sidebar:
         st.title("📚 EchoRecall")
+
+        # ── Owner Login ────────────────────────────────────────────────────────
+        owner_pwd_configured = bool(secrets.get('owner_password'))
+        if st.session_state.owner_authenticated:
+            st.success("👑 Owner mode")
+            if st.button("🔓 Logout", key="owner_logout"):
+                st.session_state.owner_authenticated = False
+                st.session_state.guest_openai_key = ''
+                st.session_state.guest_deepseek_key = ''
+                st.rerun()
+        else:
+            with st.expander("🔐 Owner Login"):
+                if owner_pwd_configured:
+                    pwd_input = st.text_input("Password", type="password", key="owner_pwd_input")
+                    if st.button("Login", key="owner_login_btn"):
+                        if pwd_input == secrets.get('owner_password', ''):
+                            st.session_state.owner_authenticated = True
+                            st.rerun()
+                        else:
+                            st.error("Incorrect password")
+                else:
+                    st.caption("Set `OWNER_PASSWORD` in `.streamlit/secrets.toml` to enable owner login.")
+
+        st.divider()
 
         # Cloud connection status
         if st.session_state.get('github_token'):
@@ -860,7 +920,7 @@ def main():
 
         st.divider()
 
-        # ── API Provider ──
+        # ── AI Provider ──
         provider = st.selectbox(
             "AI Provider",
             options=["openai", "deepseek"],
@@ -871,37 +931,45 @@ def main():
             save_data(data)
 
         api_key_configured = False
-        if provider == 'openai':
-            if secrets.get('openai_key'):
-                st.success("✅ OpenAI: Configured")
-                api_key_configured = True
+        if st.session_state.owner_authenticated:
+            # Owner: use key from secrets silently
+            if provider == 'openai':
+                if secrets.get('openai_key'):
+                    st.success("✅ OpenAI: Active")
+                    api_key_configured = True
+                else:
+                    st.warning("⚠️ No OPENAI_API_KEY in secrets.toml")
             else:
-                api_key = st.text_input(
-                    "OpenAI API Key",
-                    value=data['settings'].get('api_key', ''),
-                    type="password"
+                if secrets.get('deepseek_key'):
+                    st.success("✅ DeepSeek: Active")
+                    api_key_configured = True
+                else:
+                    st.warning("⚠️ No DEEPSEEK_API_KEY in secrets.toml")
+        else:
+            # Guest: must supply their own key
+            st.info("👋 Enter your own API key to use AI features")
+            if provider == 'openai':
+                guest_key = st.text_input(
+                    "Your OpenAI API Key",
+                    value=st.session_state.guest_openai_key,
+                    type="password",
+                    key="guest_openai_input"
                 )
-                if api_key != data['settings'].get('api_key', ''):
-                    data['settings']['api_key'] = api_key
-                    save_data(data)
-                    st.success("✅ Saved!")
-                api_key_configured = bool(api_key)
-
-        elif provider == 'deepseek':
-            if secrets.get('deepseek_key'):
-                st.success("✅ DeepSeek: Configured")
-                api_key_configured = True
+                if guest_key != st.session_state.guest_openai_key:
+                    st.session_state.guest_openai_key = guest_key
+                    data['settings']['api_key'] = guest_key
+                api_key_configured = bool(st.session_state.guest_openai_key)
             else:
-                deepseek_key = st.text_input(
-                    "DeepSeek API Key",
-                    value=data['settings'].get('deepseek_key', ''),
-                    type="password"
+                guest_key = st.text_input(
+                    "Your DeepSeek API Key",
+                    value=st.session_state.guest_deepseek_key,
+                    type="password",
+                    key="guest_deepseek_input"
                 )
-                if deepseek_key != data['settings'].get('deepseek_key', ''):
-                    data['settings']['deepseek_key'] = deepseek_key
-                    save_data(data)
-                    st.success("✅ Saved!")
-                api_key_configured = bool(deepseek_key)
+                if guest_key != st.session_state.guest_deepseek_key:
+                    st.session_state.guest_deepseek_key = guest_key
+                    data['settings']['deepseek_key'] = guest_key
+                api_key_configured = bool(st.session_state.guest_deepseek_key)
 
         st.divider()
 
@@ -994,28 +1062,31 @@ def main():
                 st.caption(f"> {p['example']}")
 
         st.divider()
-        st.subheader("🔄 Reset")
-        if not st.session_state.confirm_delete:
-            if st.button("🗑️ Delete Local Data", type="secondary"):
-                st.session_state.confirm_delete = True
-                st.rerun()
-        else:
-            st.warning(
-                f"⚠️ This will erase **all** local data "
-                f"(including your {data['daily_streak']}-day streak). Are you sure?"
-            )
-            confirm_col, cancel_col = st.columns(2)
-            with confirm_col:
-                if st.button("✅ Yes, Delete", type="primary"):
-                    if DATA_FILE.exists():
-                        DATA_FILE.unlink()
-                    for key in list(st.session_state.keys()):
-                        del st.session_state[key]
-                    st.warning("⚠️ Please refresh the page")
-            with cancel_col:
-                if st.button("❌ Cancel"):
-                    st.session_state.confirm_delete = False
+        if st.session_state.owner_authenticated:
+            st.subheader("🔄 Reset")
+            if not st.session_state.confirm_delete:
+                if st.button("🗑️ Delete Local Data", type="secondary"):
+                    st.session_state.confirm_delete = True
                     st.rerun()
+            else:
+                st.warning(
+                    f"⚠️ This will erase **all** local data "
+                    f"(including your {data['daily_streak']}-day streak). Are you sure?"
+                )
+                confirm_col, cancel_col = st.columns(2)
+                with confirm_col:
+                    if st.button("✅ Yes, Delete", type="primary"):
+                        if DATA_FILE.exists():
+                            DATA_FILE.unlink()
+                        for key in list(st.session_state.keys()):
+                            del st.session_state[key]
+                        st.warning("⚠️ Please refresh the page")
+                with cancel_col:
+                    if st.button("❌ Cancel"):
+                        st.session_state.confirm_delete = False
+                        st.rerun()
+        else:
+            st.caption("🔒 Guest session — data resets on refresh")
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # MAIN TABS
