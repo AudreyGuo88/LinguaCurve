@@ -6,6 +6,14 @@ import pandas as pd
 import requests
 import time
 import copy
+import io
+
+# Optional TTS support
+try:
+    from gtts import gTTS
+    TTS_AVAILABLE = True
+except ImportError:
+    TTS_AVAILABLE = False
 
 
 # ============================================================================
@@ -16,7 +24,6 @@ def load_secrets():
     """Load API keys and tokens from Streamlit secrets or session state"""
     secrets = {}
 
-    # Try to load from Streamlit Cloud secrets first
     try:
         if hasattr(st, 'secrets'):
             secrets['github_token'] = st.secrets.get("GITHUB_TOKEN", "")
@@ -26,7 +33,6 @@ def load_secrets():
     except Exception:
         pass
 
-    # Initialize session state with secrets
     if 'github_token' not in st.session_state:
         st.session_state.github_token = secrets.get('github_token', '')
     if 'gist_id' not in st.session_state:
@@ -103,20 +109,17 @@ class GistStorage:
                     }
                 }
             }
-
             response = requests.post(
                 "https://api.github.com/gists",
                 headers=self.headers,
                 json=payload,
                 timeout=10
             )
-
             if response.status_code == 201:
                 self.gist_id = response.json()['id']
                 return True, self.gist_id
             else:
                 return False, f"Error {response.status_code}: {response.text}"
-
         except Exception as e:
             return False, str(e)
 
@@ -124,20 +127,17 @@ class GistStorage:
         """Read data from existing Gist"""
         if not self.gist_id:
             return None, "No Gist ID provided"
-
         try:
             response = requests.get(
                 f"https://api.github.com/gists/{self.gist_id}",
                 headers=self.headers,
                 timeout=10
             )
-
             if response.status_code == 200:
                 content = response.json()['files'][self.filename]['content']
                 return json.loads(content), None
             else:
                 return None, f"Error {response.status_code}"
-
         except Exception as e:
             return None, str(e)
 
@@ -145,7 +145,6 @@ class GistStorage:
         """Update existing Gist"""
         if not self.gist_id:
             return self.create_gist(data)
-
         try:
             payload = {
                 "files": {
@@ -154,29 +153,23 @@ class GistStorage:
                     }
                 }
             }
-
             response = requests.patch(
                 f"https://api.github.com/gists/{self.gist_id}",
                 headers=self.headers,
                 json=payload,
                 timeout=10
             )
-
             if response.status_code == 200:
                 return True, None
             else:
                 return False, f"Error {response.status_code}"
-
         except Exception as e:
             return False, str(e)
 
 
 def load_data():
-    """Load data from Gist or local file"""
-    # Get secrets
+    """Load data from Gist or create new"""
     secrets = load_secrets()
-
-    # Try cloud storage first
     github_token = st.session_state.get('github_token', '')
     gist_id = st.session_state.get('gist_id', '')
 
@@ -185,7 +178,15 @@ def load_data():
         data, error = storage.read_gist()
 
         if data:
-            # Migrate old data: add category if missing
+            if 'settings' not in data:
+                data['settings'] = {}
+
+            # 🔒 Force load API keys from Secrets (never from Gist)
+            data['settings']['api_key'] = secrets.get('openai_key', '')
+            data['settings']['deepseek_key'] = secrets.get('deepseek_key', '')
+            data['settings']['api_provider'] = data['settings'].get('api_provider', 'openai')
+
+            # Migrate: add category field
             for phrase in data.get('phrase_pool', []):
                 if 'category' not in phrase:
                     phrase['category'] = 'Daily'
@@ -196,44 +197,10 @@ def load_data():
                 if 'category' not in phrase:
                     phrase['category'] = 'Daily'
 
-            # Load API keys from secrets if not in data
-            if 'settings' not in data:
-                data['settings'] = {}
-            if not data['settings'].get('api_key') and secrets.get('openai_key'):
-                data['settings']['api_key'] = secrets['openai_key']
-            if not data['settings'].get('deepseek_key') and secrets.get('deepseek_key'):
-                data['settings']['deepseek_key'] = secrets['deepseek_key']
-
             return data
 
-    # Fallback to local file
-    if DATA_FILE.exists():
-        with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-            # Migrate old data
-            for phrase in data.get('phrase_pool', []):
-                if 'category' not in phrase:
-                    phrase['category'] = 'Daily'
-            for phrase in data.get('learning', []):
-                if 'category' not in phrase:
-                    phrase['category'] = 'Daily'
-            for phrase in data.get('mastered', []):
-                if 'category' not in phrase:
-                    phrase['category'] = 'Daily'
-
-            # Load API keys from secrets
-            if 'settings' not in data:
-                data['settings'] = {}
-            if not data['settings'].get('api_key') and secrets.get('openai_key'):
-                data['settings']['api_key'] = secrets['openai_key']
-            if not data['settings'].get('deepseek_key') and secrets.get('deepseek_key'):
-                data['settings']['deepseek_key'] = secrets['deepseek_key']
-
-            return data
-
-    # Create new data with secrets
-    initial_data = {
+    # Create fresh data if no Gist
+    return {
         "phrase_pool": DEFAULT_PHRASE_POOL,
         "learning": [],
         "mastered": [],
@@ -245,61 +212,6 @@ def load_data():
             "deepseek_key": secrets.get('deepseek_key', '')
         }
     }
-
-    return initial_data
-
-
-def load_data():
-    """Load data from Gist or create new"""
-    # 从 secrets 加载配置
-    secrets = load_secrets()
-
-    # 尝试从云端加载
-    github_token = st.session_state.get('github_token', '')
-    gist_id = st.session_state.get('gist_id', '')
-
-    if github_token and gist_id:
-        storage = GistStorage(github_token, gist_id)
-        data, error = storage.read_gist()
-
-        if data:
-            # 🔒 强制从 Secrets 覆盖 API keys（永远不从 Gist 读取）
-            if 'settings' not in data:
-                data['settings'] = {}
-
-            # 从 Secrets 加载（覆盖任何 Gist 中的值）
-            data['settings']['api_key'] = secrets.get('openai_key', '')
-            data['settings']['deepseek_key'] = secrets.get('deepseek_key', '')
-            data['settings']['api_provider'] = data['settings'].get('api_provider', 'openai')
-
-            # 迁移：添加 category 字段
-            for phrase in data.get('phrase_pool', []):
-                if 'category' not in phrase:
-                    phrase['category'] = 'Daily'
-            for phrase in data.get('learning', []):
-                if 'category' not in phrase:
-                    phrase['category'] = 'Daily'
-            for phrase in data.get('mastered', []):
-                if 'category' not in phrase:
-                    phrase['category'] = 'Daily'
-
-            return data
-
-    # 如果没有 Gist，创建全新数据
-    initial_data = {
-        "phrase_pool": DEFAULT_PHRASE_POOL,
-        "learning": [],
-        "mastered": [],
-        "daily_streak": 0,
-        "last_study_date": None,
-        "settings": {
-            "api_key": secrets.get('openai_key', ''),  # 只从 Secrets 加载
-            "api_provider": "openai",
-            "deepseek_key": secrets.get('deepseek_key', '')
-        }
-    }
-
-    return initial_data
 
 
 def get_today_phrases(data, count=5):
@@ -387,23 +299,18 @@ def update_streak(data):
 
 def save_data(data):
     """Save data to Gist (NEVER save API keys)"""
-
-    # 创建深拷贝并清除所有敏感信息
     data_to_save = copy.deepcopy(data)
 
-    # 强制清空所有 API Keys
     if 'settings' in data_to_save:
         data_to_save['settings']['api_key'] = ''
         data_to_save['settings']['deepseek_key'] = ''
 
-    # 保存到本地文件
     try:
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data_to_save, f, ensure_ascii=False, indent=2)
     except Exception as e:
         st.error(f"⚠️ Local save failed: {e}")
 
-    # 保存到 Gist
     github_token = st.session_state.get('github_token', '')
     gist_id = st.session_state.get('gist_id', '')
 
@@ -420,6 +327,7 @@ def save_data(data):
     elif error:
         st.warning(f"⚠️ Cloud sync failed: {error}")
 
+
 # ============================================================================
 # AI API Integration
 # ============================================================================
@@ -431,26 +339,22 @@ def call_openai_api(api_key, messages, model="gpt-4o-mini"):
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-
         payload = {
             "model": model,
             "messages": messages,
             "temperature": 0.7,
             "max_tokens": 800
         }
-
         response = requests.post(
             "https://api.openai.com/v1/chat/completions",
             headers=headers,
             json=payload,
             timeout=30
         )
-
         if response.status_code == 200:
             return response.json()['choices'][0]['message']['content']
         else:
             return f"❌ API Error: {response.status_code}"
-
     except Exception as e:
         return f"❌ Connection Error: {str(e)}"
 
@@ -462,26 +366,22 @@ def call_deepseek_api(api_key, messages, model="deepseek-chat"):
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-
         payload = {
             "model": model,
             "messages": messages,
             "temperature": 0.7,
             "max_tokens": 800
         }
-
         response = requests.post(
             "https://api.deepseek.com/v1/chat/completions",
             headers=headers,
             json=payload,
             timeout=30
         )
-
         if response.status_code == 200:
             return response.json()['choices'][0]['message']['content']
         else:
             return f"❌ API Error: {response.status_code}"
-
     except Exception as e:
         return f"❌ Connection Error: {str(e)}"
 
@@ -569,19 +469,15 @@ Return ONLY the JSON array. No markdown, no explanations."""
     with st.spinner("🤖 Generating..."):
         response = call_ai_api(data, messages)
 
-    # Check if response is an error message
     if response.startswith("❌") or response.startswith("⚠️"):
         return False, response
 
     try:
-        # 🔍 Show raw response for debugging
         with st.expander("🔍 Debug: AI Response"):
             st.code(response[:800], language=None)
 
-        # Clean response
         response = response.strip()
 
-        # Remove markdown code blocks
         if "```" in response:
             parts = response.split("```")
             for part in parts:
@@ -594,10 +490,9 @@ Return ONLY the JSON array. No markdown, no explanations."""
                         json.loads(part)
                         response = part
                         break
-                    except:
+                    except Exception:
                         continue
 
-        # Extract JSON array
         start_idx = response.find('[')
         end_idx = response.rfind(']')
 
@@ -605,8 +500,6 @@ Return ONLY the JSON array. No markdown, no explanations."""
             response = response[start_idx:end_idx + 1]
 
         response = response.strip()
-
-        # Parse JSON
         new_phrases = json.loads(response)
 
         if isinstance(new_phrases, list) and len(new_phrases) > 0:
@@ -628,7 +521,6 @@ Return ONLY the JSON array. No markdown, no explanations."""
 
     except json.JSONDecodeError as e:
         st.error(f"❌ JSON Parse Error at position {e.pos}")
-        st.error("Response content:")
         st.code(response[:1000], language=None)
         return False, f"Parse error: {str(e)}"
     except Exception as e:
@@ -649,7 +541,7 @@ def check_and_refill_pool(data, threshold=10):
 
 
 # ============================================================================
-# Streamlit UI
+# UI Helper Functions
 # ============================================================================
 
 def get_category_color(category):
@@ -663,6 +555,91 @@ def get_category_color(category):
     return colors.get(category, '📌')
 
 
+def get_proficiency_icon(review_count, is_mastered=False):
+    """Return growth stage icon based on review progress"""
+    if is_mastered:
+        return "🌳"
+    elif review_count <= 1:
+        return "🌱"
+    else:
+        return "🌿"
+
+
+def get_streak_icon(streak):
+    """Return dynamic icon based on streak count"""
+    if streak == 0:
+        return "💤"
+    elif streak <= 2:
+        return "🕯️"
+    elif streak <= 7:
+        return "🔥"
+    elif streak <= 20:
+        return "🚀"
+    else:
+        return "⚡"
+
+
+def get_tts_audio(text):
+    """Generate TTS audio bytes for given text"""
+    if not TTS_AVAILABLE:
+        return None
+    try:
+        tts = gTTS(text=text, lang='en', slow=False)
+        audio_fp = io.BytesIO()
+        tts.write_to_fp(audio_fp)
+        audio_fp.seek(0)
+        return audio_fp
+    except Exception:
+        return None
+
+
+def generate_daily_challenge(data, phrases):
+    """Generate a fill-in-the-blank story using today's phrases"""
+    phrase_texts = [p['phrase'] for p in phrases[:5]]
+
+    system_prompt = """You are a creative and humorous English teacher.
+Create a short, funny story (4-6 sentences) that naturally uses exactly the 5 given phrases.
+In the story, replace each phrase with a blank marker. Use [BLANK_1] through [BLANK_5] in the ORDER they appear in the story.
+
+Return ONLY valid JSON (no markdown, no explanation):
+{
+  "story": "The full story text with [BLANK_1], [BLANK_2], [BLANK_3], [BLANK_4], [BLANK_5] placed where each phrase belongs",
+  "answers": ["phrase for blank 1", "phrase for blank 2", "phrase for blank 3", "phrase for blank 4", "phrase for blank 5"]
+}
+
+The answers array must list all 5 phrases in the EXACT order they appear as [BLANK_1] to [BLANK_5]."""
+
+    user_prompt = f"Write a funny story using ALL 5 of these phrases in any order: {', '.join(phrase_texts)}"
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+
+    with st.spinner("🎭 Crafting your Daily Challenge..."):
+        response = call_ai_api(data, messages)
+
+    if response.startswith("❌") or response.startswith("⚠️"):
+        return None, response
+
+    try:
+        response = response.strip()
+        start = response.find('{')
+        end = response.rfind('}')
+        if start != -1 and end != -1:
+            response = response[start:end + 1]
+        result = json.loads(response)
+        if 'story' in result and 'answers' in result:
+            return result, None
+        return None, "Invalid response format"
+    except Exception as e:
+        return None, f"Parse error: {e}"
+
+
+# ============================================================================
+# Main UI
+# ============================================================================
+
 def main():
     st.set_page_config(
         page_title="EchoRecall English",
@@ -670,20 +647,95 @@ def main():
         layout="wide"
     )
 
-    # Load secrets
+    # ── Global CSS ────────────────────────────────────────────────────────────
+    st.markdown("""
+<style>
+/* Phrase card containers */
+[data-testid="stVerticalBlockBorderWrapper"] {
+    border-radius: 14px !important;
+    border: 1px solid #e0e7ff !important;
+    box-shadow: 0 2px 12px rgba(99, 102, 241, 0.07) !important;
+    background: linear-gradient(135deg, #fafbff 0%, #f5f0ff 100%) !important;
+    transition: box-shadow 0.2s ease;
+}
+[data-testid="stVerticalBlockBorderWrapper"]:hover {
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.16) !important;
+}
+/* Category badge */
+.cat-badge {
+    display: inline-block;
+    background: #e0e7ff;
+    color: #4338ca;
+    border-radius: 20px;
+    padding: 2px 12px;
+    font-size: 0.8em;
+    font-weight: 600;
+    margin-right: 4px;
+}
+/* Challenge story box */
+.story-box {
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
+    border-radius: 10px;
+    padding: 16px 20px;
+    font-size: 1.05em;
+    line-height: 2.0;
+    margin: 12px 0;
+}
+.blank-tag {
+    display: inline-block;
+    background: #fef3c7;
+    border: 2px dashed #f59e0b;
+    border-radius: 6px;
+    padding: 0 10px;
+    color: #92400e;
+    font-weight: 700;
+    font-size: 0.95em;
+}
+/* Sidebar streak */
+.streak-display {
+    font-size: 1.35em;
+    font-weight: 700;
+    margin: 4px 0 10px 0;
+}
+</style>
+""", unsafe_allow_html=True)
+
+    # ── Load secrets ──────────────────────────────────────────────────────────
     secrets = load_secrets()
 
-    # Sidebar
-    with st.sidebar:
-        st.title("⚙️ Settings")
+    # ── Session state initialisation ─────────────────────────────────────────
+    if 'reviewed_today' not in st.session_state:
+        st.session_state.reviewed_today = set()
+    if 'just_reviewed' not in st.session_state:
+        st.session_state.just_reviewed = False
+    if 'learn_mode' not in st.session_state:
+        st.session_state.learn_mode = 5
+    if 'challenge_data' not in st.session_state:
+        st.session_state.challenge_data = None
+    if 'challenge_passed' not in st.session_state:
+        st.session_state.challenge_passed = False
 
-        # Show connection status
+    # ── Load data (once, shared by all tabs) ─────────────────────────────────
+    data = load_data()
+
+    # ── Balloons celebration (fires after any ✅ review) ─────────────────────
+    if st.session_state.just_reviewed:
+        st.balloons()
+        st.session_state.just_reviewed = False
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # SIDEBAR
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    with st.sidebar:
+        st.title("📚 EchoRecall")
+
+        # Cloud connection status
         if st.session_state.get('github_token'):
             st.success("☁️ Cloud: Connected")
             if st.session_state.get('gist_id'):
                 st.caption(f"Gist: `{st.session_state.gist_id[:8]}...`")
 
-        # Only show manual input if secrets not configured
         if not secrets.get('github_token'):
             with st.expander("☁️ Manual Cloud Setup"):
                 github_token = st.text_input(
@@ -691,39 +743,31 @@ def main():
                     value=st.session_state.get('github_token', ''),
                     type="password"
                 )
-
-                gist_id = st.text_input(
+                gist_id_input = st.text_input(
                     "Gist ID (Optional)",
                     value=st.session_state.get('gist_id', '')
                 )
-
                 if st.button("💾 Connect"):
                     if github_token:
                         st.session_state.github_token = github_token
-                        if gist_id:
-                            st.session_state.gist_id = gist_id
+                        if gist_id_input:
+                            st.session_state.gist_id = gist_id_input
                         st.success("✅ Connected!")
                         st.rerun()
 
         st.divider()
 
-        # Load data
-        data = load_data()
-
-        # API Provider
+        # ── API Provider ──
         provider = st.selectbox(
             "AI Provider",
             options=["openai", "deepseek"],
             index=0 if data['settings'].get('api_provider', 'openai') == 'openai' else 1
         )
-
         if provider != data['settings'].get('api_provider'):
             data['settings']['api_provider'] = provider
             save_data(data)
 
-        # Only show API key input if not in secrets
         api_key_configured = False
-
         if provider == 'openai':
             if secrets.get('openai_key'):
                 st.success("✅ OpenAI: Configured")
@@ -758,7 +802,29 @@ def main():
 
         st.divider()
 
-        # Phrase pool
+        # ── Dynamic streak display ──
+        streak = data['daily_streak']
+        streak_icon = get_streak_icon(streak)
+        st.markdown(
+            f'<div class="streak-display">{streak_icon} {streak}-day streak</div>',
+            unsafe_allow_html=True
+        )
+
+        # ── Today's progress bar ──
+        today_phrases_sidebar = get_today_phrases(data, count=st.session_state.learn_mode)
+        completed_count = len(st.session_state.reviewed_today)
+        total_count = len(today_phrases_sidebar)
+
+        st.markdown("**Today's Progress**")
+        if total_count > 0:
+            progress_val = min(completed_count / total_count, 1.0)
+            st.progress(progress_val, text=f"✅ {completed_count} / {total_count} completed")
+        else:
+            st.progress(1.0, text="🎉 All done!")
+
+        st.divider()
+
+        # ── Phrase pool ──
         st.subheader("📦 Phrase Pool")
         available = len([p for p in data['phrase_pool']
                          if not any(p['phrase'] == lp['phrase'] for lp in data['learning'])
@@ -775,134 +841,288 @@ def main():
                     st.error(f"❌ {result}")
 
         st.divider()
-
-        # Stats
-        st.metric("🔥 Streak", f"{data['daily_streak']} days")
         st.metric("📖 Learning", len(data['learning']))
         st.metric("✅ Mastered", len(data['mastered']))
 
         st.divider()
         st.subheader("🔄 Reset")
-
         if st.button("🗑️ Delete Local Data", type="secondary"):
-            # 删除本地文件
             if DATA_FILE.exists():
                 DATA_FILE.unlink()
                 st.success("✅ Local file deleted")
-
-            # 清空 session state
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
-
             st.warning("⚠️ Please refresh the page")
             st.info("Next save will create a fresh Gist")
 
-    # Main tabs
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # MAIN TABS
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     tab1, tab2, tab3 = st.tabs(["📚 Today's Learning", "💬 Practice Chat", "📊 Progress"])
 
-    # TAB 1
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # TAB 1 — Today's Learning
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     with tab1:
         st.title("📚 Today's Learning")
 
+        # Auto-refill phrase pool if running low
         refill_result = check_and_refill_pool(data, threshold=10)
         if refill_result[0] is True:
-            st.info(f"🤖 Auto-generated {refill_result[1]} phrases!")
+            st.info(f"🤖 Auto-generated {refill_result[1]} new phrases!")
 
-        col1, col2 = st.columns([3, 1])
-        with col2:
-            learn_mode = st.selectbox("Phrases/day", [5, 10, 15, 20], index=0)
+        col_title, col_mode = st.columns([3, 1])
+        with col_mode:
+            st.selectbox("Phrases/day", [5, 10, 15, 20], key='learn_mode')
 
-        today_phrases = get_today_phrases(data, count=learn_mode)
+        today_phrases = get_today_phrases(data, count=st.session_state.learn_mode)
 
         if not today_phrases:
-            st.success("🎉 All done!")
+            st.success("🎉 All done for today! Come back tomorrow.")
         else:
-            st.info(f"📌 {len(today_phrases)} phrases")
+            done_count = len(st.session_state.reviewed_today)
+            st.info(f"📌 {len(today_phrases)} phrases today — {done_count} completed")
 
             for i, phrase_data in enumerate(today_phrases, 1):
+                phrase_text = phrase_data['phrase']
                 category = phrase_data.get('category', 'Daily')
-                emoji = get_category_color(category)
+                cat_emoji = get_category_color(category)
 
-                col1, col2 = st.columns([3, 1])
+                # Determine proficiency level
+                is_mastered = any(p['phrase'] == phrase_text for p in data['mastered'])
+                learning_info = next(
+                    (p for p in data['learning'] if p['phrase'] == phrase_text), None
+                )
+                review_count = learning_info.get('review_count', 0) if learning_info else 0
+                proficiency_icon = get_proficiency_icon(review_count, is_mastered)
+                already_done = phrase_text in st.session_state.reviewed_today
 
-                with col1:
-                    st.markdown(f"### {i}. {phrase_data['phrase']} {emoji}")
-                    st.markdown(f"**`{category}`** | {phrase_data['chinese']}")
-                    st.write(f"**例句：** {phrase_data['example']}")
+                # ── Phrase Card (Material-style) ──────────────────────────────
+                with st.container(border=True):
+                    header_col, action_col = st.columns([4, 1])
 
-                    if any(p['phrase'] == phrase_data['phrase'] for p in data['learning']):
-                        info = next(p for p in data['learning'] if p['phrase'] == phrase_data['phrase'])
-                        st.caption(f"📅 Review #{info.get('review_count', 0) + 1}")
+                    with header_col:
+                        st.markdown(f"### {proficiency_icon} {phrase_text}")
+                        st.markdown(
+                            f'<span class="cat-badge">{cat_emoji} {category}</span>',
+                            unsafe_allow_html=True
+                        )
+                        if learning_info:
+                            next_rev = phrase_data.get('next_review', '?')
+                            st.caption(
+                                f"Review #{review_count + 1} · next review: {next_rev}"
+                            )
 
-                with col2:
-                    if st.button(f"✅", key=f"r_{i}"):
-                        mark_reviewed(data, phrase_data['phrase'])
-                        update_streak(data)
-                        st.rerun()
+                    with action_col:
+                        st.write("")  # vertical breathing room
+                        if already_done:
+                            st.success("✅ Done!")
+                        else:
+                            if st.button(
+                                "✅ Mark Done",
+                                key=f"review_{i}",
+                                type="primary"
+                            ):
+                                mark_reviewed(data, phrase_text)
+                                update_streak(data)
+                                st.session_state.reviewed_today.add(phrase_text)
+                                st.session_state.just_reviewed = True
+                                st.rerun()
 
-                st.divider()
+                    # ── Active Recall: details hidden by default ──────────────
+                    with st.expander("🧠 Reveal: Translation & Example"):
+                        st.markdown(f"**🇨🇳 中文：** {phrase_data['chinese']}")
+                        st.markdown(
+                            f"**✍️ Example：**  \n> *{phrase_data['example']}*"
+                        )
 
-    # TAB 2
+                    # ── TTS pronunciation ─────────────────────────────────────
+                    tts_col, _ = st.columns([1, 3])
+                    with tts_col:
+                        if TTS_AVAILABLE:
+                            tts_key = f'show_audio_{i}'
+                            if st.button("🔊 Listen", key=f"tts_btn_{i}"):
+                                st.session_state[tts_key] = not st.session_state.get(tts_key, False)
+                            if st.session_state.get(tts_key, False):
+                                audio_bytes = get_tts_audio(phrase_text)
+                                if audio_bytes:
+                                    st.audio(audio_bytes, format='audio/mp3')
+                                else:
+                                    st.caption("TTS failed — check internet")
+                        else:
+                            st.caption("Install `gTTS` for 🔊")
+
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # DAILY CHALLENGE MODULE
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        st.divider()
+
+        provider_name = data['settings'].get('api_provider', 'openai')
+        has_api_key = bool(
+            data['settings'].get(
+                'api_key' if provider_name == 'openai' else 'deepseek_key', ''
+            )
+        )
+
+        with st.container(border=True):
+            st.subheader("🎯 Daily Challenge")
+            st.caption("Fill in the blanks — reinforce all 5 phrases at once")
+
+            if len(today_phrases) < 5:
+                st.info("Need at least 5 phrases to generate a Daily Challenge.")
+            elif not has_api_key:
+                st.warning("⚠️ Configure an API Key in the sidebar to unlock Daily Challenge.")
+            else:
+                challenge = st.session_state.challenge_data
+
+                # Generate / reset controls
+                gen_col, reset_col = st.columns([2, 1])
+                with gen_col:
+                    if challenge is None:
+                        if st.button("🎲 Generate Today's Challenge", type="primary"):
+                            result, error = generate_daily_challenge(data, today_phrases[:5])
+                            if result:
+                                st.session_state.challenge_data = result
+                                st.session_state.challenge_passed = False
+                                st.rerun()
+                            else:
+                                st.error(f"❌ {error}")
+                with reset_col:
+                    if challenge is not None and not st.session_state.challenge_passed:
+                        if st.button("🔄 New Story"):
+                            st.session_state.challenge_data = None
+                            st.session_state.challenge_passed = False
+                            st.rerun()
+
+                if challenge:
+                    if st.session_state.challenge_passed:
+                        st.success("🌟 Challenge completed! All 5 phrases marked as reviewed.")
+                    else:
+                        # Render story with highlighted blank placeholders
+                        story_html = challenge['story']
+                        for j in range(1, 6):
+                            story_html = story_html.replace(
+                                f'[BLANK_{j}]',
+                                f'<span class="blank-tag">__ {j} __</span>'
+                            )
+                        st.markdown(
+                            f'<div class="story-box">{story_html}</div>',
+                            unsafe_allow_html=True
+                        )
+
+                        # Input fields (3-column grid)
+                        answers = challenge.get('answers', [])
+                        user_inputs = []
+                        input_cols = st.columns(min(len(answers), 3))
+                        for j, _ in enumerate(answers):
+                            col_idx = j % 3
+                            with input_cols[col_idx]:
+                                val = st.text_input(
+                                    f"Blank {j + 1}:",
+                                    key=f"blank_input_{j}",
+                                    placeholder="type the phrase…"
+                                )
+                                user_inputs.append(val)
+
+                        # Submit & check
+                        if st.button("📝 Submit Answers", type="primary"):
+                            results = [
+                                u.strip().lower() == c.strip().lower()
+                                for u, c in zip(user_inputs, answers)
+                            ]
+                            all_correct = all(results)
+
+                            if all_correct:
+                                st.session_state.challenge_passed = True
+                                st.balloons()
+                                # Auto-mark all 5 challenge phrases as reviewed
+                                for p in today_phrases[:5]:
+                                    if p['phrase'] not in st.session_state.reviewed_today:
+                                        mark_reviewed(data, p['phrase'])
+                                        st.session_state.reviewed_today.add(p['phrase'])
+                                update_streak(data)
+                                st.rerun()
+                            else:
+                                st.error("Some blanks are wrong — try again!")
+                                for j, (res, correct) in enumerate(zip(results, answers)):
+                                    if res:
+                                        st.markdown(f"✅ Blank {j + 1}: correct!")
+                                    else:
+                                        hint = correct[:3] + "…"
+                                        given = user_inputs[j] or "(empty)"
+                                        st.markdown(
+                                            f"❌ Blank {j + 1}: `{given}` — hint: *{hint}*"
+                                        )
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # TAB 2 — Practice Chat
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     with tab2:
         st.title("💬 Practice")
 
-        provider = data['settings'].get('api_provider', 'openai')
-        has_key = bool(data['settings'].get('api_key' if provider == 'openai' else 'deepseek_key'))
+        provider_name = data['settings'].get('api_provider', 'openai')
+        has_key = bool(
+            data['settings'].get('api_key' if provider_name == 'openai' else 'deepseek_key', '')
+        )
 
         if not has_key:
-            st.warning("⚠️ Add API Key in Settings")
-            st.stop()
+            st.warning("⚠️ Add an API Key in the sidebar to enable Practice Chat.")
+        else:
+            today_phrases_chat = get_today_phrases(data, count=5)
+            keywords = [p['phrase'] for p in today_phrases_chat[:5]]
 
-        today_phrases = get_today_phrases(data, count=5)
-        keywords = [p['phrase'] for p in today_phrases[:5]]
+            if keywords:
+                st.info(f"**Keywords:** {', '.join(keywords)}")
 
-        if keywords:
-            st.info(f"**Keywords:** {', '.join(keywords)}")
+            if 'messages' not in st.session_state:
+                st.session_state.messages = []
+                system_msg = (
+                    f"You are a friendly English teacher. Today's phrases: {', '.join(keywords)}. "
+                    "Encourage their usage, point out mistakes gently."
+                )
+                with st.spinner("Starting conversation…"):
+                    initial = call_ai_api(data, [
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": "Hi!"}
+                    ])
+                st.session_state.messages.append({"role": "assistant", "content": initial})
+                st.session_state.system_context = system_msg
 
-        if 'messages' not in st.session_state:
-            st.session_state.messages = []
-            system_msg = f"You are a friendly teacher. Today's phrases: {', '.join(keywords)}. Encourage usage, point out mistakes gently."
+            for msg in st.session_state.messages:
+                with st.chat_message(msg["role"]):
+                    st.write(msg["content"])
 
-            with st.spinner("Starting..."):
-                initial = call_ai_api(data, [
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": "Hi!"}
-                ])
+            if prompt := st.chat_input("Type here…"):
+                st.session_state.messages.append({"role": "user", "content": prompt})
+                with st.chat_message("user"):
+                    st.write(prompt)
 
-            st.session_state.messages.append({"role": "assistant", "content": initial})
-            st.session_state.system_context = system_msg
+                with st.chat_message("assistant"):
+                    with st.spinner("🤔"):
+                        api_msgs = [{"role": "system", "content": st.session_state.system_context}]
+                        api_msgs.extend(
+                            [{"role": m["role"], "content": m["content"]}
+                             for m in st.session_state.messages[-10:]]
+                        )
+                        response = call_ai_api(data, api_msgs)
+                    st.write(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
 
-        for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.write(msg["content"])
+            if st.button("🔄 New Conversation"):
+                st.session_state.messages = []
+                if 'system_context' in st.session_state:
+                    del st.session_state.system_context
+                st.rerun()
 
-        if prompt := st.chat_input("Type..."):
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.write(prompt)
-
-            with st.chat_message("assistant"):
-                with st.spinner("🤔"):
-                    api_msgs = [{"role": "system", "content": st.session_state.system_context}]
-                    api_msgs.extend(
-                        [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[-10:]])
-                    response = call_ai_api(data, api_msgs)
-
-                st.write(response)
-                st.session_state.messages.append({"role": "assistant", "content": response})
-
-        if st.button("🔄 New"):
-            st.session_state.messages = []
-            if 'system_context' in st.session_state:
-                del st.session_state.system_context
-            st.rerun()
-
-    # TAB 3
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # TAB 3 — Progress
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     with tab3:
         st.title("📊 Progress")
 
+        streak = data['daily_streak']
         col1, col2, col3 = st.columns(3)
-        col1.metric("🔥 Streak", f"{data['daily_streak']}")
+        col1.metric(f"{get_streak_icon(streak)} Streak", f"{streak} days")
         col2.metric("📖 Learning", len(data['learning']))
         col3.metric("✅ Mastered", len(data['mastered']))
 
@@ -910,10 +1130,21 @@ def main():
             st.subheader("📚 In Progress")
             df = pd.DataFrame([{
                 'Phrase': p['phrase'],
+                'Proficiency': get_proficiency_icon(p.get('review_count', 0)),
                 'Category': p.get('category', 'Daily'),
-                'Next': p.get('next_review', 'N/A')
+                'Next Review': p.get('next_review', 'N/A'),
+                'Reviews Done': p.get('review_count', 0)
             } for p in data['learning']])
             st.dataframe(df, use_container_width=True)
+
+        if data['mastered']:
+            st.subheader("🌳 Mastered")
+            df_mastered = pd.DataFrame([{
+                'Phrase': p['phrase'],
+                'Chinese': p.get('chinese', ''),
+                'Category': p.get('category', 'Daily')
+            } for p in data['mastered']])
+            st.dataframe(df_mastered, use_container_width=True)
 
 
 if __name__ == "__main__":

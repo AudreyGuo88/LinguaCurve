@@ -1,6 +1,7 @@
 streamlit>=1.28.0
 pandas>=2.0.0
 requests>=2.31.0
+gTTS>=2.4.0
 ```
 
 **3. `.gitignore`** 
