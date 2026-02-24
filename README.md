@@ -17,19 +17,21 @@ Close the terminal window to exit.
 - Learn 5–20 phrases per day (configurable via the dropdown)
 - Each card shows a **proficiency icon** based on review history:
   - 🌱 First review · 🌿 In progress · 🌳 Mastered
-- **Active Recall** — translation and example are hidden by default; click **"🧠 Reveal"** to check yourself
-- **Bulk controls** — "👁 Reveal All" opens every card at once for quick review; "🙈 Hide All" resets them
-- **Done-card feedback** — clicking "✅ Mark Done" immediately dims the card, strikes through the title, and shows a green "Completed" badge
+- **Active Recall** — Chinese translation and example are hidden by default; click **"🧠 Reveal"** to check yourself
+- **Bulk controls** — "👁 Reveal All" opens every card at once; "🙈 Hide All" resets them
+- **Done-card feedback** — clicking "✅ Mark Done" dims the card, strikes through the title, and shows a green "Completed" badge
+- **⭐ I Know This** — skip the SRS schedule entirely for phrases you already know; they move to the Mastered library instantly
 
 ### 2. Spaced Repetition (SRS)
 - Review schedule based on the Ebbinghaus forgetting curve:
   - 1 day → 3 days → 7 days → 15 days → Mastered
 - Phrases due today surface automatically; new phrases fill any remaining slots
+- Dismissed (⭐) and mastered (🌳) phrases are permanently excluded from daily reviews
 
 ### 3. TTS Pronunciation
 - Click **"🔊 Listen"** on any card to hear the phrase spoken aloud
 - Powered by Google Text-to-Speech (`gTTS`) — requires an internet connection
-- Shows an install hint if `gTTS` is not found
+- Available on phrase cards in Today's Learning **and** in the Progress library
 
 ### 4. Daily Challenge 🎯
 - AI generates a short, humorous story using today's 5 phrases as fill-in-the-blank gaps
@@ -38,14 +40,16 @@ Close the terminal window to exit.
 
 ### 5. Practice Chat 💬
 - Conversational AI tutor focused on today's phrases
-- **Word Bank** — a pinned chip row above the chat shows all 5 phrases; chips turn green with a ✓ as you use each one in conversation
+- **Word Bank** — a pinned chip row above the chat shows all 5 phrases; chips turn green with a ✓ as you use each one
 - Encourages natural usage and gently corrects mistakes
 
-### 6. Progress Tracking 📊
-- **Animated progress bar** in Tab 1 with a changing emoji as you advance (📋 → 🌱 → 💪 → 🔥 → 🎉)
+### 6. Progress Library 📊
+- **In Progress** — phrases still on the SRS schedule, grouped by category (🏠 Daily · 💼 Business · 👥 Social · 📺 TV Series); click any phrase to review its translation, example, and pronunciation
+- **Mastered** — all completed (🌳) and manually dismissed (⭐) phrases, also grouped by category; click to review at any time
+- **↩️ Re-learn** button on every mastered phrase — moves it back into the SRS queue if you want to practise it again
+- Four summary metrics: Streak · In Progress · Mastered · Known
+- **Animated progress bar** in Today's Learning with a changing emoji as you advance (📋 → 🌱 → 💪 → 🔥 → 🎉)
 - **Streak counter** with dynamic sidebar icons: 💤 / 🕯️ / 🔥 / 🚀 / ⚡
-- Live sidebar progress bar (today's completed vs. total)
-- Progress tab shows full learning and mastered phrase tables
 
 ---
 
@@ -108,7 +112,7 @@ Back up `learning_data.json` if you are not using Gist sync.
 - Edit `run_app.bat` and append `--server.port 8502` to the last line
 
 **"🔊 Listen" not working?**
-- Run `pip install gTTS` and restart the app
+- Run `venv\Scripts\pip install gTTS` and restart the app
 - Requires an active internet connection
 
 **Daily Challenge not available?**
@@ -116,7 +120,10 @@ Back up `learning_data.json` if you are not using Gist sync.
 - Need at least 5 phrases in today's list
 
 **Accidentally clicked "Delete Local Data"?**
-- The button now requires a second confirmation — click **"❌ Cancel"** to abort safely
+- The button requires a second confirmation — click **"❌ Cancel"** to abort safely
+
+**Accidentally clicked "⭐ I Know This"?**
+- Go to **📊 Progress → Mastered**, find the phrase, and click **"↩️ Re-learn"** to restore it to the review schedule
 
 ---
 
