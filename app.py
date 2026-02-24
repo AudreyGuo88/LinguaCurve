@@ -473,9 +473,6 @@ Return ONLY the JSON array. No markdown, no explanations."""
         return False, response
 
     try:
-        with st.expander("🔍 Debug: AI Response"):
-            st.code(response[:800], language=None)
-
         response = response.strip()
 
         if "```" in response:
@@ -1251,23 +1248,46 @@ def main():
 
         if data['learning']:
             st.subheader("📚 In Progress")
-            df = pd.DataFrame([{
-                'Phrase': p['phrase'],
-                'Proficiency': get_proficiency_icon(p.get('review_count', 0)),
-                'Category': p.get('category', 'Daily'),
-                'Next Review': p.get('next_review', 'N/A'),
-                'Reviews Done': p.get('review_count', 0)
-            } for p in data['learning']])
-            st.dataframe(df, use_container_width=True)
+            for p in data['learning']:
+                prof = get_proficiency_icon(p.get('review_count', 0))
+                cat_emoji = get_category_color(p.get('category', 'Daily'))
+                label = (
+                    f"{prof} **{p['phrase']}** "
+                    f"· {cat_emoji} {p.get('category','Daily')} "
+                    f"· Review #{p.get('review_count', 0) + 1} "
+                    f"· next: {p.get('next_review','?')}"
+                )
+                with st.expander(label):
+                    st.markdown(f"**🇨🇳 中文：** {p.get('chinese', '')}")
+                    st.markdown(f"**✍️ Example：**  \n> *{p.get('example', '')}*")
+                    if TTS_AVAILABLE:
+                        tts_key = f"prog_tts_{p['phrase']}"
+                        if st.button("🔊 Listen", key=f"prog_tts_btn_{p['phrase']}"):
+                            st.session_state[tts_key] = not st.session_state.get(tts_key, False)
+                        if st.session_state.get(tts_key, False):
+                            audio = get_tts_audio(p['phrase'])
+                            if audio:
+                                st.audio(audio, format='audio/mp3')
 
         if data['mastered']:
             st.subheader("🌳 Mastered")
-            df_mastered = pd.DataFrame([{
-                'Phrase': p['phrase'],
-                'Chinese': p.get('chinese', ''),
-                'Category': p.get('category', 'Daily')
-            } for p in data['mastered']])
-            st.dataframe(df_mastered, use_container_width=True)
+            for p in data['mastered']:
+                cat_emoji = get_category_color(p.get('category', 'Daily'))
+                label = (
+                    f"🌳 **{p['phrase']}** "
+                    f"· {cat_emoji} {p.get('category','Daily')}"
+                )
+                with st.expander(label):
+                    st.markdown(f"**🇨🇳 中文：** {p.get('chinese', '')}")
+                    st.markdown(f"**✍️ Example：**  \n> *{p.get('example', '')}*")
+                    if TTS_AVAILABLE:
+                        tts_key = f"mast_tts_{p['phrase']}"
+                        if st.button("🔊 Listen", key=f"mast_tts_btn_{p['phrase']}"):
+                            st.session_state[tts_key] = not st.session_state.get(tts_key, False)
+                        if st.session_state.get(tts_key, False):
+                            audio = get_tts_audio(p['phrase'])
+                            if audio:
+                                st.audio(audio, format='audio/mp3')
 
 
 if __name__ == "__main__":
