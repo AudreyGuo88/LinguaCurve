@@ -1,54 +1,117 @@
 # EchoRecall English 📚
 
-A minimalist English learning desktop app with Spaced Repetition System (SRS).
+A minimalist English learning app with Spaced Repetition, Active Recall, and AI-powered Daily Challenges.
 
+---
 
-### Daily Use
+## 🚀 Quick Start
 
-- Just double-click `run_app.bat` to start
-- The app runs at `http://localhost:8501`
-- Close the terminal window to exit
+Double-click `run_app.bat` — the app opens at `http://localhost:8501`.
+Close the terminal window to exit.
+
+---
 
 ## 📖 Features
 
-### 1. Daily 5 Phrases
-- Learn 5 new phrases or review due phrases every day
-- Mark phrases as reviewed with one click
+### 1. Smart Phrase Cards
+- Learn 5–20 phrases per day (configurable)
+- Each card shows a **proficiency icon** based on review history:
+  - 🌱 First review &nbsp;·&nbsp; 🌿 In progress &nbsp;·&nbsp; 🌳 Mastered
+- Translation and example sentence are **hidden by default** — click **"🧠 Reveal"** to test yourself (Active Recall)
 
 ### 2. Spaced Repetition (SRS)
-- Reviews at: 1 day → 3 days → 7 days → 15 days
-- Automatic scheduling based on Ebbinghaus curve
+- Review schedule based on the Ebbinghaus forgetting curve:
+  - 1 day → 3 days → 7 days → 15 days → Mastered
+- Phrases due today surface automatically; new phrases fill any remaining slots
 
-### 3. Practice Chat
-- Immersive roleplay with today's keywords
-- (Optional) Add your OpenAI/Anthropic API key for real AI
+### 3. TTS Pronunciation
+- Click **"🔊 Listen"** on any card to hear the phrase spoken aloud
+- Powered by Google Text-to-Speech (`gTTS`) — requires an internet connection
+- Gracefully disabled if `gTTS` is not installed
 
-### 4. Progress Tracking
-- Daily streak counter
-- Visual charts of learning progress
+### 4. Daily Challenge 🎯
+- Generates a short, humorous story that uses today's 5 phrases as blanks
+- Fill in all blanks correctly to auto-mark all 5 phrases as reviewed at once
+- Requires an AI API key (OpenAI or DeepSeek)
 
-## ⚙️ Configuration
+### 5. Practice Chat 💬
+- Conversational AI tutor focused on today's phrases
+- Encourages natural usage and gently corrects mistakes
 
-- Click "Settings" in the sidebar
-- Add API key (optional) for AI chat
-- Reset data if needed
+### 6. Progress Tracking 📊
+- **Streak counter** with dynamic icons: 💤 / 🕯️ / 🔥 / 🚀 / ⚡
+- Live progress bar in the sidebar (today's completed vs. total)
+- Progress tab shows full learning and mastered phrase tables
+
+---
+
+## ⚙️ Setup
+
+### Install dependencies
+
+```bash
+pip install streamlit pandas requests gTTS
+```
+
+### AI API Key (optional — required for Daily Challenge & Practice Chat)
+
+Add your key in the sidebar under **AI Provider**:
+
+| Provider | Where to get |
+|----------|-------------|
+| OpenAI   | platform.openai.com |
+| DeepSeek | platform.deepseek.com |
+
+Keys are **never** written to disk or synced to cloud.
+
+### Cloud Sync (optional)
+
+Store your learning data in a private GitHub Gist so it persists across devices:
+
+1. Create a GitHub personal access token (scope: `gist`)
+2. Enter it under **"☁️ Manual Cloud Setup"** in the sidebar
+3. Your data syncs automatically on every review
+
+For Streamlit Cloud deployments, add secrets in the dashboard:
+
+```toml
+# .streamlit/secrets.toml
+GITHUB_TOKEN = "ghp_..."
+GIST_ID = "abc123..."          # leave blank on first run
+OPENAI_API_KEY = "sk-..."      # or use DEEPSEEK_API_KEY
+```
+
+---
 
 ## 📂 Data Storage
 
-All your learning data is saved in `learning_data.json` in the same folder.
+| Location | When used |
+|----------|-----------|
+| `learning_data.json` | Always (local fallback) |
+| GitHub Gist | When GitHub token is configured |
+
+Back up `learning_data.json` if you are not using Gist sync.
+
+---
 
 ## ❓ Troubleshooting
 
 **App won't start?**
-- Make sure Python is installed
-- Right-click `run_app.bat` → Run as Administrator
+- Ensure Python 3.9+ is installed
+- Try: right-click `run_app.bat` → Run as Administrator
 
 **Port already in use?**
-- Close other Streamlit apps
-- Or edit `run_app.bat` and add `--server.port 8502` to the last line
+- Edit `run_app.bat` and append `--server.port 8502` to the last line
 
-**Lost your data?**
-- Your data is in `learning_data.json` - back it up regularly!
+**"🔊 Listen" button missing / not working?**
+- Run `pip install gTTS` and restart the app
+- Requires an active internet connection
+
+**Daily Challenge not available?**
+- Add an API key (OpenAI or DeepSeek) in the sidebar
+- Need at least 5 phrases in today's list
+
+---
 
 ## 📝 License
 
