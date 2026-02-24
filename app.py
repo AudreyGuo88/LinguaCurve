@@ -650,18 +650,37 @@ def main():
     # ── Global CSS ────────────────────────────────────────────────────────────
     st.markdown("""
 <style>
-/* Phrase card containers */
+/* ── Base phrase card ── */
 [data-testid="stVerticalBlockBorderWrapper"] {
     border-radius: 14px !important;
     border: 1px solid #e0e7ff !important;
     box-shadow: 0 2px 12px rgba(99, 102, 241, 0.07) !important;
     background: linear-gradient(135deg, #fafbff 0%, #f5f0ff 100%) !important;
-    transition: box-shadow 0.2s ease;
+    transition: background 0.3s ease, box-shadow 0.2s ease, opacity 0.3s ease;
 }
 [data-testid="stVerticalBlockBorderWrapper"]:hover {
     box-shadow: 0 4px 20px rgba(99, 102, 241, 0.16) !important;
 }
-/* Category badge */
+/* ── Done card: muted green state via :has() ── */
+[data-testid="stVerticalBlockBorderWrapper"]:has(.done-card-marker) {
+    background: linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%) !important;
+    border-color: #6ee7b7 !important;
+    box-shadow: 0 1px 6px rgba(16, 185, 129, 0.08) !important;
+    opacity: 0.78;
+}
+/* ── Done badge ── */
+.done-badge {
+    display: inline-block;
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #6ee7b7;
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 0.78em;
+    font-weight: 700;
+    margin-right: 6px;
+}
+/* ── Category badge ── */
 .cat-badge {
     display: inline-block;
     background: #e0e7ff;
@@ -672,7 +691,23 @@ def main():
     font-weight: 600;
     margin-right: 4px;
 }
-/* Challenge story box */
+/* ── Word Bank chips (Practice tab) ── */
+.word-chip {
+    display: inline-block;
+    background: #f1f5f9;
+    border: 1.5px solid #cbd5e1;
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: 0.88em;
+    font-weight: 600;
+    color: #475569;
+}
+.word-chip-used {
+    background: #dcfce7;
+    border-color: #6ee7b7;
+    color: #065f46;
+}
+/* ── Challenge story box ── */
 .story-box {
     background: #fffbeb;
     border: 1px solid #fcd34d;
@@ -692,7 +727,7 @@ def main():
     font-weight: 700;
     font-size: 0.95em;
 }
-/* Sidebar streak */
+/* ── Sidebar streak ── */
 .streak-display {
     font-size: 1.35em;
     font-weight: 700;
@@ -715,6 +750,10 @@ def main():
         st.session_state.challenge_data = None
     if 'challenge_passed' not in st.session_state:
         st.session_state.challenge_passed = False
+    if 'reveal_all' not in st.session_state:
+        st.session_state.reveal_all = False
+    if 'confirm_delete' not in st.session_state:
+        st.session_state.confirm_delete = False
 
     # ── Load data (once, shared by all tabs) ─────────────────────────────────
     data = load_data()
@@ -846,14 +885,27 @@ def main():
 
         st.divider()
         st.subheader("🔄 Reset")
-        if st.button("🗑️ Delete Local Data", type="secondary"):
-            if DATA_FILE.exists():
-                DATA_FILE.unlink()
-                st.success("✅ Local file deleted")
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.warning("⚠️ Please refresh the page")
-            st.info("Next save will create a fresh Gist")
+        if not st.session_state.confirm_delete:
+            if st.button("🗑️ Delete Local Data", type="secondary"):
+                st.session_state.confirm_delete = True
+                st.rerun()
+        else:
+            st.warning(
+                f"⚠️ This will erase **all** local data "
+                f"(including your {data['daily_streak']}-day streak). Are you sure?"
+            )
+            confirm_col, cancel_col = st.columns(2)
+            with confirm_col:
+                if st.button("✅ Yes, Delete", type="primary"):
+                    if DATA_FILE.exists():
+                        DATA_FILE.unlink()
+                    for key in list(st.session_state.keys()):
+                        del st.session_state[key]
+                    st.warning("⚠️ Please refresh the page")
+            with cancel_col:
+                if st.button("❌ Cancel"):
+                    st.session_state.confirm_delete = False
+                    st.rerun()
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # MAIN TABS
@@ -881,7 +933,27 @@ def main():
             st.success("🎉 All done for today! Come back tomorrow.")
         else:
             done_count = len(st.session_state.reviewed_today)
-            st.info(f"📌 {len(today_phrases)} phrases today — {done_count} completed")
+            total_count_t1 = len(today_phrases)
+            pct = done_count / total_count_t1 if total_count_t1 > 0 else 0.0
+            progress_emoji = (
+                "🎉" if pct >= 1.0 else
+                "🔥" if pct >= 0.75 else
+                "💪" if pct >= 0.5 else
+                "🌱" if pct > 0 else
+                "📋"
+            )
+            st.progress(pct, text=f"{progress_emoji}  {done_count} / {total_count_t1} phrases completed")
+
+            # ── Bulk reveal/hide controls ──────────────────────────────────
+            reveal_col, hide_col, _ = st.columns([1, 1, 5])
+            with reveal_col:
+                if st.button("👁 Reveal All"):
+                    st.session_state.reveal_all = True
+                    st.rerun()
+            with hide_col:
+                if st.button("🙈 Hide All"):
+                    st.session_state.reveal_all = False
+                    st.rerun()
 
             for i, phrase_data in enumerate(today_phrases, 1):
                 phrase_text = phrase_data['phrase']
@@ -899,24 +971,40 @@ def main():
 
                 # ── Phrase Card (Material-style) ──────────────────────────────
                 with st.container(border=True):
+
+                    # Invisible marker for CSS :has() done-card styling
+                    if already_done:
+                        st.markdown(
+                            '<span class="done-card-marker" style="display:none"></span>',
+                            unsafe_allow_html=True
+                        )
+
                     header_col, action_col = st.columns([4, 1])
 
                     with header_col:
-                        st.markdown(f"### {proficiency_icon} {phrase_text}")
-                        st.markdown(
-                            f'<span class="cat-badge">{cat_emoji} {category}</span>',
-                            unsafe_allow_html=True
-                        )
-                        if learning_info:
-                            next_rev = phrase_data.get('next_review', '?')
-                            st.caption(
-                                f"Review #{review_count + 1} · next review: {next_rev}"
+                        if already_done:
+                            # Strikethrough title + Completed + category badge in one block
+                            st.markdown(
+                                f'<h3 style="text-decoration:line-through;color:#9ca3af;'
+                                f'margin-bottom:6px;">{proficiency_icon} {phrase_text}</h3>'
+                                f'<span class="done-badge">✅ Completed</span>'
+                                f'<span class="cat-badge">{cat_emoji} {category}</span>',
+                                unsafe_allow_html=True
                             )
+                        else:
+                            st.markdown(f"### {proficiency_icon} {phrase_text}")
+                            st.markdown(
+                                f'<span class="cat-badge">{cat_emoji} {category}</span>',
+                                unsafe_allow_html=True
+                            )
+                            if learning_info:
+                                next_rev = phrase_data.get('next_review', '?')
+                                st.caption(f"Review #{review_count + 1} · next: {next_rev}")
 
                     with action_col:
                         st.write("")  # vertical breathing room
                         if already_done:
-                            st.success("✅ Done!")
+                            st.write("✅")
                         else:
                             if st.button(
                                 "✅ Mark Done",
@@ -929,8 +1017,11 @@ def main():
                                 st.session_state.just_reviewed = True
                                 st.rerun()
 
-                    # ── Active Recall: details hidden by default ──────────────
-                    with st.expander("🧠 Reveal: Translation & Example"):
+                    # ── Active Recall: hidden by default, Reveal All overrides ─
+                    with st.expander(
+                        "🧠 Reveal: Translation & Example",
+                        expanded=st.session_state.reveal_all
+                    ):
                         st.markdown(f"**🇨🇳 中文：** {phrase_data['chinese']}")
                         st.markdown(
                             f"**✍️ Example：**  \n> *{phrase_data['example']}*"
@@ -948,9 +1039,9 @@ def main():
                                 if audio_bytes:
                                     st.audio(audio_bytes, format='audio/mp3')
                                 else:
-                                    st.caption("TTS failed — check internet")
+                                    st.caption("TTS failed — check internet connection")
                         else:
-                            st.caption("Install `gTTS` for 🔊")
+                            st.caption("💡 `pip install gTTS` to enable pronunciation")
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # DAILY CHALLENGE MODULE
@@ -1072,7 +1163,39 @@ def main():
             keywords = [p['phrase'] for p in today_phrases_chat[:5]]
 
             if keywords:
-                st.info(f"**Keywords:** {', '.join(keywords)}")
+                # ── Word Bank: chip row with live usage tracking ──────────────
+                all_user_text = ' '.join(
+                    m['content'].lower()
+                    for m in st.session_state.get('messages', [])
+                    if m['role'] == 'user'
+                )
+                chips_html = (
+                    '<div style="margin:0 0 12px 0;">'
+                    '<p style="font-size:0.85em;color:#6b7280;margin-bottom:6px;">'
+                    '📋 <strong>Word Bank</strong> — try to use all 5 phrases:</p>'
+                    '<div style="display:flex;flex-wrap:wrap;gap:8px;">'
+                )
+                used_count = 0
+                for kw in keywords:
+                    used = kw.lower() in all_user_text
+                    if used:
+                        used_count += 1
+                        chips_html += f'<span class="word-chip word-chip-used">{kw} ✓</span>'
+                    else:
+                        chips_html += f'<span class="word-chip">{kw}</span>'
+                chips_html += '</div>'
+                if used_count == len(keywords):
+                    chips_html += (
+                        '<p style="font-size:0.82em;color:#065f46;margin-top:6px;">'
+                        '🎉 All phrases used!</p>'
+                    )
+                else:
+                    chips_html += (
+                        f'<p style="font-size:0.82em;color:#6b7280;margin-top:6px;">'
+                        f'{used_count} / {len(keywords)} used so far</p>'
+                    )
+                chips_html += '</div>'
+                st.markdown(chips_html, unsafe_allow_html=True)
 
             if 'messages' not in st.session_state:
                 st.session_state.messages = []

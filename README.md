@@ -1,6 +1,6 @@
 # EchoRecall English 📚
 
-A minimalist English learning app with Spaced Repetition, Active Recall, and AI-powered Daily Challenges.
+An English learning app with Spaced Repetition, Active Recall, AI-powered Daily Challenges, and live pronunciation.
 
 ---
 
@@ -14,10 +14,12 @@ Close the terminal window to exit.
 ## 📖 Features
 
 ### 1. Smart Phrase Cards
-- Learn 5–20 phrases per day (configurable)
+- Learn 5–20 phrases per day (configurable via the dropdown)
 - Each card shows a **proficiency icon** based on review history:
-  - 🌱 First review &nbsp;·&nbsp; 🌿 In progress &nbsp;·&nbsp; 🌳 Mastered
-- Translation and example sentence are **hidden by default** — click **"🧠 Reveal"** to test yourself (Active Recall)
+  - 🌱 First review · 🌿 In progress · 🌳 Mastered
+- **Active Recall** — translation and example are hidden by default; click **"🧠 Reveal"** to check yourself
+- **Bulk controls** — "👁 Reveal All" opens every card at once for quick review; "🙈 Hide All" resets them
+- **Done-card feedback** — clicking "✅ Mark Done" immediately dims the card, strikes through the title, and shows a green "Completed" badge
 
 ### 2. Spaced Repetition (SRS)
 - Review schedule based on the Ebbinghaus forgetting curve:
@@ -27,20 +29,22 @@ Close the terminal window to exit.
 ### 3. TTS Pronunciation
 - Click **"🔊 Listen"** on any card to hear the phrase spoken aloud
 - Powered by Google Text-to-Speech (`gTTS`) — requires an internet connection
-- Gracefully disabled if `gTTS` is not installed
+- Shows an install hint if `gTTS` is not found
 
 ### 4. Daily Challenge 🎯
-- Generates a short, humorous story that uses today's 5 phrases as blanks
-- Fill in all blanks correctly to auto-mark all 5 phrases as reviewed at once
+- AI generates a short, humorous story using today's 5 phrases as fill-in-the-blank gaps
+- Pass the challenge to auto-mark all 5 phrases as reviewed at once
 - Requires an AI API key (OpenAI or DeepSeek)
 
 ### 5. Practice Chat 💬
 - Conversational AI tutor focused on today's phrases
+- **Word Bank** — a pinned chip row above the chat shows all 5 phrases; chips turn green with a ✓ as you use each one in conversation
 - Encourages natural usage and gently corrects mistakes
 
 ### 6. Progress Tracking 📊
-- **Streak counter** with dynamic icons: 💤 / 🕯️ / 🔥 / 🚀 / ⚡
-- Live progress bar in the sidebar (today's completed vs. total)
+- **Animated progress bar** in Tab 1 with a changing emoji as you advance (📋 → 🌱 → 💪 → 🔥 → 🎉)
+- **Streak counter** with dynamic sidebar icons: 💤 / 🕯️ / 🔥 / 🚀 / ⚡
+- Live sidebar progress bar (today's completed vs. total)
 - Progress tab shows full learning and mastered phrase tables
 
 ---
@@ -103,13 +107,16 @@ Back up `learning_data.json` if you are not using Gist sync.
 **Port already in use?**
 - Edit `run_app.bat` and append `--server.port 8502` to the last line
 
-**"🔊 Listen" button missing / not working?**
+**"🔊 Listen" not working?**
 - Run `pip install gTTS` and restart the app
 - Requires an active internet connection
 
 **Daily Challenge not available?**
 - Add an API key (OpenAI or DeepSeek) in the sidebar
 - Need at least 5 phrases in today's list
+
+**Accidentally clicked "Delete Local Data"?**
+- The button now requires a second confirmation — click **"❌ Cancel"** to abort safely
 
 ---
 
