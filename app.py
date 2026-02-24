@@ -1,6 +1,7 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import json
+import base64
 from datetime import datetime, timedelta
 from pathlib import Path
 import pandas as pd
@@ -661,6 +662,36 @@ def get_tts_audio(text):
         return None
 
 
+@st.cache_data(show_spinner=False)
+def _tts_b64(text):
+    """Return base64-encoded MP3 for text (cached per unique text)."""
+    if not TTS_AVAILABLE:
+        return None
+    try:
+        tts = gTTS(text=text, lang='en', slow=False)
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        return base64.b64encode(fp.getvalue()).decode()
+    except Exception:
+        return None
+
+
+def tts_button(text, key, label="🔊"):
+    """Render a Listen button that plays audio invisibly (no player widget)."""
+    if not TTS_AVAILABLE:
+        return
+    if st.button(label, key=key, help="Listen"):
+        b64 = _tts_b64(text)
+        if b64:
+            # JS Audio object is DOM-independent: survives re-renders
+            components.html(
+                f"<script>(new Audio('data:audio/mp3;base64,{b64}')).play()</script>",
+                height=0
+            )
+        else:
+            st.caption("⚠️ TTS unavailable")
+
+
 def generate_daily_challenge(data, phrases):
     """Generate a fill-in-the-blank story using today's phrases"""
     phrase_texts = [p['phrase'] for p in phrases[:5]]
@@ -830,7 +861,12 @@ def main():
         st.session_state.guest_deepseek_key = ''
     if 'nav_to_tab' not in st.session_state:
         st.session_state.nav_to_tab = None
-    # Tracks which of today's phrases were brand-new vs already in SRS
+    # Locked phrase set for today — fixed at session start, never changes mid-session
+    if 'session_today_phrases' not in st.session_state:
+        st.session_state.session_today_phrases = []
+    if 'session_locked_mode' not in st.session_state:
+        st.session_state.session_locked_mode = None
+    # Categorisation: which locked phrases are brand-new vs SRS-due reviews
     if 'session_new_phrases' not in st.session_state:
         st.session_state.session_new_phrases = set()
     if 'session_review_phrases' not in st.session_state:
@@ -981,10 +1017,28 @@ def main():
             unsafe_allow_html=True
         )
 
+        # ── Lock today's phrase set once per session / learn_mode ────────────
+        if (not st.session_state.session_today_phrases or
+                st.session_state.session_locked_mode != st.session_state.learn_mode):
+            fresh = get_today_phrases(data, count=st.session_state.learn_mode)
+            st.session_state.session_today_phrases = fresh
+            st.session_state.session_locked_mode = st.session_state.learn_mode
+            # Re-categorise new vs review
+            learning_set_now = {p['phrase'] for p in data['learning']}
+            st.session_state.session_new_phrases = {
+                p['phrase'] for p in fresh if p['phrase'] not in learning_set_now
+            }
+            st.session_state.session_review_phrases = {
+                p['phrase'] for p in fresh if p['phrase'] in learning_set_now
+            }
+
+        locked_phrases = st.session_state.session_today_phrases
+
         # ── Today's progress bar ──
-        today_phrases_sidebar = get_today_phrases(data, count=st.session_state.learn_mode)
-        completed_count = len(st.session_state.reviewed_today)
-        total_count = len(today_phrases_sidebar)
+        completed_count = sum(
+            1 for p in locked_phrases if p['phrase'] in st.session_state.reviewed_today
+        )
+        total_count = len(locked_phrases)
 
         st.markdown("**Today's Progress**")
         if total_count > 0:
@@ -992,16 +1046,6 @@ def main():
             st.progress(progress_val, text=f"✅ {completed_count} / {total_count} completed")
         else:
             st.progress(1.0, text="🎉 All done!")
-
-        # ── Categorise today's phrases (new vs review) — updates incrementally ─
-        current_learning_set = {p['phrase'] for p in data['learning']}
-        seen = st.session_state.session_new_phrases | st.session_state.session_review_phrases
-        for p in today_phrases_sidebar:
-            if p['phrase'] not in seen:
-                if p['phrase'] in current_learning_set:
-                    st.session_state.session_review_phrases.add(p['phrase'])
-                else:
-                    st.session_state.session_new_phrases.add(p['phrase'])
 
         st.divider()
 
@@ -1121,12 +1165,13 @@ def main():
         with col_mode:
             st.selectbox("Phrases/day", [5, 10, 15, 20], key='learn_mode')
 
-        today_phrases = get_today_phrases(data, count=st.session_state.learn_mode)
+        # Use the locked session set — never changes mid-session
+        today_phrases = st.session_state.session_today_phrases
 
         if not today_phrases:
             st.success("🎉 All done for today! Come back tomorrow.")
         else:
-            # Split into pending vs learned today
+            # Split using the locked set so completed phrases stay visible
             pending_phrases = [p for p in today_phrases if p['phrase'] not in st.session_state.reviewed_today]
             learned_phrases = [p['phrase'] for p in today_phrases if p['phrase'] in st.session_state.reviewed_today]
 
@@ -1212,26 +1257,15 @@ def main():
                             expanded=st.session_state.reveal_all
                         ):
                             st.markdown(f"**🇨🇳 Chinese:** {phrase_data['chinese']}")
-                            st.markdown(
-                                f"**✍️ Example：**  \n> *{phrase_data['example']}*"
-                            )
+                            ex_col, ex_btn_col = st.columns([6, 1])
+                            with ex_col:
+                                st.markdown(f"**✍️ Example：**  \n> *{phrase_data['example']}*")
+                            with ex_btn_col:
+                                tts_button(phrase_data['example'], key=f"tts_ex_up_{idx}")
 
                         tts_col, _ = st.columns([1, 3])
                         with tts_col:
-                            if TTS_AVAILABLE:
-                                if st.button("🔊 Listen", key=f"tts_up_{idx}"):
-                                    ab = get_tts_audio(phrase_text)
-                                    if ab:
-                                        st.session_state[f'tts_play_up_{idx}'] = ab
-                                    st.rerun()
-                                play_key = f'tts_play_up_{idx}'
-                                if play_key in st.session_state:
-                                    ab = st.session_state[play_key]
-                                    del st.session_state[play_key]
-                                    ab.seek(0)
-                                    st.audio(ab, format='audio/mp3', autoplay=True)
-                            else:
-                                st.caption("💡 `pip install gTTS` to enable pronunciation")
+                            tts_button(phrase_text, key=f"tts_up_{idx}", label="🔊 Listen")
 
             # ── Section 2: Learned Today ───────────────────────────────────
             if learned_phrases:
@@ -1255,19 +1289,12 @@ def main():
                             unsafe_allow_html=True
                         )
                         st.markdown(f"**🇨🇳 Chinese:** {pd_full['chinese']}")
-                        st.markdown(f"**✍️ Example：**  \n> *{pd_full['example']}*")
-                        if TTS_AVAILABLE:
-                            if st.button("🔊 Listen", key=f"tts_done_{idx}"):
-                                ab = get_tts_audio(phrase_text)
-                                if ab:
-                                    st.session_state[f'tts_play_done_{idx}'] = ab
-                                st.rerun()
-                            play_key2 = f'tts_play_done_{idx}'
-                            if play_key2 in st.session_state:
-                                ab = st.session_state[play_key2]
-                                del st.session_state[play_key2]
-                                ab.seek(0)
-                                st.audio(ab, format='audio/mp3', autoplay=True)
+                        ex_col2, ex_btn_col2 = st.columns([6, 1])
+                        with ex_col2:
+                            st.markdown(f"**✍️ Example：**  \n> *{pd_full['example']}*")
+                        with ex_btn_col2:
+                            tts_button(pd_full['example'], key=f"tts_ex_done_{idx}")
+                        tts_button(phrase_text, key=f"tts_done_{idx}", label="🔊 Listen")
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # DAILY CHALLENGE MODULE
@@ -1444,8 +1471,8 @@ def main():
                         if st.button("🔊", key=f"chat_tts_{msg_idx}", help="Listen"):
                             ab = get_tts_audio(msg["content"])
                             if ab:
+                                ab.seek(0)
                                 st.session_state[f'chat_tts_play_{msg_idx}'] = ab
-                            st.rerun()
                         chat_play_key = f'chat_tts_play_{msg_idx}'
                         if chat_play_key in st.session_state:
                             ab = st.session_state[chat_play_key]
