@@ -1161,9 +1161,8 @@ def main():
             # ── Section 1: Up Next ─────────────────────────────────────────
             if pending_phrases:
                 st.markdown(f"#### 📋 Up Next — {len(pending_phrases)} remaining")
-                for phrase_data in pending_phrases:
+                for idx, phrase_data in enumerate(pending_phrases):
                     phrase_text = phrase_data['phrase']
-                    safe_key = phrase_text.replace(' ', '_').replace("'", '').replace('"', '')
                     category = phrase_data.get('category', 'Daily')
                     cat_emoji = get_category_color(category)
 
@@ -1191,7 +1190,7 @@ def main():
                             st.write("")
                             if st.button(
                                 "✅ Mark Done",
-                                key=f"review_{safe_key}",
+                                key=f"review_up_{idx}",
                                 type="primary"
                             ):
                                 mark_reviewed(data, phrase_text)
@@ -1200,7 +1199,7 @@ def main():
                                 st.rerun()
                             if st.button(
                                 "⭐ I Know This",
-                                key=f"dismiss_{safe_key}",
+                                key=f"dismiss_up_{idx}",
                                 help="I've fully mastered this — remove it from the review schedule",
                                 type="secondary"
                             ):
@@ -1220,26 +1219,27 @@ def main():
                         tts_col, _ = st.columns([1, 3])
                         with tts_col:
                             if TTS_AVAILABLE:
-                                tts_key = f'show_audio_{safe_key}'
-                                if st.button("🔊 Listen", key=f"tts_btn_{safe_key}"):
-                                    st.session_state[tts_key] = not st.session_state.get(tts_key, False)
-                                if st.session_state.get(tts_key, False):
-                                    audio_bytes = get_tts_audio(phrase_text)
-                                    if audio_bytes:
-                                        st.audio(audio_bytes, format='audio/mp3')
-                                    else:
-                                        st.caption("TTS failed — check internet connection")
+                                if st.button("🔊 Listen", key=f"tts_up_{idx}"):
+                                    ab = get_tts_audio(phrase_text)
+                                    if ab:
+                                        st.session_state[f'tts_play_up_{idx}'] = ab
+                                    st.rerun()
+                                play_key = f'tts_play_up_{idx}'
+                                if play_key in st.session_state:
+                                    ab = st.session_state[play_key]
+                                    del st.session_state[play_key]
+                                    ab.seek(0)
+                                    st.audio(ab, format='audio/mp3', autoplay=True)
                             else:
                                 st.caption("💡 `pip install gTTS` to enable pronunciation")
 
             # ── Section 2: Learned Today ───────────────────────────────────
             if learned_phrases:
                 st.markdown(f"#### ✅ Learned Today — {len(learned_phrases)}")
-                for phrase_text in learned_phrases:
+                for idx, phrase_text in enumerate(learned_phrases):
                     pd_full = get_phrase_data(data, phrase_text)
                     if pd_full is None:
                         continue
-                    safe_key = phrase_text.replace(' ', '_').replace("'", '').replace('"', '')
                     category = pd_full.get('category', 'Daily')
                     cat_emoji = get_category_color(category)
                     is_mastered = any(p['phrase'] == phrase_text for p in data['mastered'])
@@ -1257,13 +1257,17 @@ def main():
                         st.markdown(f"**🇨🇳 Chinese:** {pd_full['chinese']}")
                         st.markdown(f"**✍️ Example：**  \n> *{pd_full['example']}*")
                         if TTS_AVAILABLE:
-                            tts_key2 = f'show_audio_done_{safe_key}'
-                            if st.button("🔊 Listen", key=f"tts_done_{safe_key}"):
-                                st.session_state[tts_key2] = not st.session_state.get(tts_key2, False)
-                            if st.session_state.get(tts_key2, False):
-                                audio_bytes = get_tts_audio(phrase_text)
-                                if audio_bytes:
-                                    st.audio(audio_bytes, format='audio/mp3')
+                            if st.button("🔊 Listen", key=f"tts_done_{idx}"):
+                                ab = get_tts_audio(phrase_text)
+                                if ab:
+                                    st.session_state[f'tts_play_done_{idx}'] = ab
+                                st.rerun()
+                            play_key2 = f'tts_play_done_{idx}'
+                            if play_key2 in st.session_state:
+                                ab = st.session_state[play_key2]
+                                del st.session_state[play_key2]
+                                ab.seek(0)
+                                st.audio(ab, format='audio/mp3', autoplay=True)
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # DAILY CHALLENGE MODULE
@@ -1433,9 +1437,21 @@ def main():
                 st.session_state.messages.append({"role": "assistant", "content": initial})
                 st.session_state.system_context = system_msg
 
-            for msg in st.session_state.messages:
+            for msg_idx, msg in enumerate(st.session_state.messages):
                 with st.chat_message(msg["role"]):
                     st.write(msg["content"])
+                    if msg["role"] == "assistant" and TTS_AVAILABLE:
+                        if st.button("🔊", key=f"chat_tts_{msg_idx}", help="Listen"):
+                            ab = get_tts_audio(msg["content"])
+                            if ab:
+                                st.session_state[f'chat_tts_play_{msg_idx}'] = ab
+                            st.rerun()
+                        chat_play_key = f'chat_tts_play_{msg_idx}'
+                        if chat_play_key in st.session_state:
+                            ab = st.session_state[chat_play_key]
+                            del st.session_state[chat_play_key]
+                            ab.seek(0)
+                            st.audio(ab, format='audio/mp3', autoplay=True)
 
             if prompt := st.chat_input("Type here…"):
                 st.session_state.messages.append({"role": "user", "content": prompt})
