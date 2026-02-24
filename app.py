@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -815,6 +816,8 @@ def main():
         st.session_state.confirm_delete = False
     if 'celebration_fired' not in st.session_state:
         st.session_state.celebration_fired = False
+    if 'nav_to_tab' not in st.session_state:
+        st.session_state.nav_to_tab = None
     # Tracks which of today's phrases were brand-new vs already in SRS
     if 'session_new_phrases' not in st.session_state:
         st.session_state.session_new_phrases = set()
@@ -954,43 +957,40 @@ def main():
 
         # ── 4-item navigation library ──────────────────────────────────────────
 
-        # 1. In Progress
-        with st.expander(f"📖 In Progress ({len(data['learning'])})"):
-            for p in sorted(data['learning'], key=lambda x: x.get('next_review', '')):
-                st.markdown(f"**{p['phrase']}**  \n{p['chinese']}")
-
-        # 2. Mastered
+        # 1 & 2: In Progress / Mastered — nav buttons → Progress tab
         mastered_all = data['mastered'] + data.get('dismissed', [])
-        with st.expander(f"✅ Mastered ({len(mastered_all)})"):
-            for p in mastered_all:
-                st.markdown(f"**{p['phrase']}**  \n{p['chinese']}")
+        if st.button(f"📖 In Progress  ({len(data['learning'])})", use_container_width=True):
+            st.session_state.nav_to_tab = 2
+            st.rerun()
+        if st.button(f"✅ Mastered  ({len(mastered_all)})", use_container_width=True):
+            st.session_state.nav_to_tab = 2
+            st.rerun()
 
-        # 3. New Today — brand-new phrases introduced today
+        # 3. New Today — brand-new phrases introduced this session
+        # (no filter against today_phrases_sidebar — completed phrases leave that list)
         new_today_list = [
             get_phrase_data(data, pt)
             for pt in st.session_state.session_new_phrases
-            if any(pt == sp['phrase'] for sp in today_phrases_sidebar)
         ]
         new_today_list = [p for p in new_today_list if p is not None]
         new_done_count = sum(1 for p in new_today_list if p['phrase'] in st.session_state.reviewed_today)
         with st.expander(f"🌱 New Today ({new_done_count}/{len(new_today_list)})"):
             for p in new_today_list:
                 done_mark = " ✅" if p['phrase'] in st.session_state.reviewed_today else ""
-                st.markdown(f"**{p['phrase']}**{done_mark}  \n{p['chinese']}")
+                st.markdown(f"**{p['phrase']}**{done_mark}")
                 st.caption(f"> {p['example']}")
 
-        # 4. Reviewed Today — SRS-due phrases revisited today
+        # 4. Reviewed Today — SRS-due phrases revisited this session
         rev_today_list = [
             get_phrase_data(data, pt)
             for pt in st.session_state.session_review_phrases
-            if any(pt == sp['phrase'] for sp in today_phrases_sidebar)
         ]
         rev_today_list = [p for p in rev_today_list if p is not None]
         rev_done_count = sum(1 for p in rev_today_list if p['phrase'] in st.session_state.reviewed_today)
         with st.expander(f"🔁 Reviewed Today ({rev_done_count}/{len(rev_today_list)})"):
             for p in rev_today_list:
                 done_mark = " ✅" if p['phrase'] in st.session_state.reviewed_today else ""
-                st.markdown(f"**{p['phrase']}**{done_mark}  \n{p['chinese']}")
+                st.markdown(f"**{p['phrase']}**{done_mark}")
                 st.caption(f"> {p['example']}")
 
         st.divider()
@@ -1021,6 +1021,19 @@ def main():
     # MAIN TABS
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     tab1, tab2, tab3 = st.tabs(["📚 Today's Learning", "💬 Practice Chat", "📊 Progress"])
+
+    # ── JS tab navigation (fires once when nav_to_tab is set by sidebar) ──────
+    if st.session_state.nav_to_tab is not None:
+        tab_idx = st.session_state.nav_to_tab
+        st.session_state.nav_to_tab = None
+        components.html(f"""
+        <script>
+        setTimeout(function() {{
+            var tabs = window.parent.document.querySelectorAll('button[data-baseweb="tab"]');
+            if (tabs.length > {tab_idx}) tabs[{tab_idx}].click();
+        }}, 100);
+        </script>
+        """, height=0)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # TAB 1 — Today's Learning
