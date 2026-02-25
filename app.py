@@ -1205,7 +1205,15 @@ def main():
 
             # ── Section 1: Up Next ─────────────────────────────────────────
             if pending_phrases:
-                st.markdown(f"#### 📋 Up Next — {len(pending_phrases)} remaining")
+                review_ct = sum(1 for p in pending_phrases if p['phrase'] in st.session_state.session_review_phrases)
+                new_ct = len(pending_phrases) - review_ct
+                if review_ct > 0 and new_ct > 0:
+                    up_next_sub = f"{new_ct} new · {review_ct} SRS reviews"
+                elif review_ct > 0:
+                    up_next_sub = f"{review_ct} SRS reviews (phrases you learned before)"
+                else:
+                    up_next_sub = f"{new_ct} new"
+                st.markdown(f"#### 📋 Up Next — {up_next_sub}")
                 for idx, phrase_data in enumerate(pending_phrases):
                     phrase_text = phrase_data['phrase']
                     category = phrase_data.get('category', 'Daily')
@@ -1223,8 +1231,18 @@ def main():
 
                         with header_col:
                             st.markdown(f"### {proficiency_icon} {phrase_text}")
+                            is_srs_review = phrase_text in st.session_state.session_review_phrases
+                            type_badge = (
+                                '<span style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;'
+                                'border-radius:12px;padding:2px 9px;font-size:0.75em;font-weight:600;'
+                                'margin-right:6px;">🔁 Review</span>'
+                                if is_srs_review else
+                                '<span style="background:#e0e7ff;color:#4338ca;border:1px solid #a5b4fc;'
+                                'border-radius:12px;padding:2px 9px;font-size:0.75em;font-weight:600;'
+                                'margin-right:6px;">✨ New</span>'
+                            )
                             st.markdown(
-                                f'<span class="cat-badge">{cat_emoji} {category}</span>',
+                                f'{type_badge}<span class="cat-badge">{cat_emoji} {category}</span>',
                                 unsafe_allow_html=True
                             )
                             if learning_info:
@@ -1295,6 +1313,36 @@ def main():
                         with ex_btn_col2:
                             tts_button(pd_full['example'], key=f"tts_ex_done_{idx}")
                         tts_button(phrase_text, key=f"tts_done_{idx}", label="🔊 Listen")
+
+            # ── Load More: when all locked phrases are done ────────────────
+            if not pending_phrases and today_phrases:
+                locked_texts = {p['phrase'] for p in st.session_state.session_today_phrases}
+                dismissed_texts = {p['phrase'] for p in data.get('dismissed', [])}
+                mastered_texts = {p['phrase'] for p in data.get('mastered', [])}
+                learning_texts = {p['phrase'] for p in data.get('learning', [])}
+                extra_pool = [
+                    p for p in data['phrase_pool']
+                    if p['phrase'] not in learning_texts
+                    and p['phrase'] not in mastered_texts
+                    and p['phrase'] not in dismissed_texts
+                    and p['phrase'] not in locked_texts
+                ]
+                st.markdown("---")
+                if extra_pool:
+                    n_more = min(st.session_state.learn_mode, len(extra_pool))
+                    load_col, _ = st.columns([2, 3])
+                    with load_col:
+                        if st.button(f"➕ Load {n_more} More Phrases", type="primary", key="load_more_btn"):
+                            st.session_state.session_today_phrases = (
+                                st.session_state.session_today_phrases + extra_pool[:n_more]
+                            )
+                            st.session_state.session_new_phrases.update(
+                                {p['phrase'] for p in extra_pool[:n_more]}
+                            )
+                            st.session_state.celebration_fired = False
+                            st.rerun()
+                else:
+                    st.info("📭 No more phrases available in the pool. Use **🔄 Generate 5 New** in the sidebar to add more.")
 
         # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         # DAILY CHALLENGE MODULE
