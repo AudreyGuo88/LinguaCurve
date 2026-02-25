@@ -860,8 +860,6 @@ def main():
         st.session_state.challenge_passed = False
     if 'reveal_all' not in st.session_state:
         st.session_state.reveal_all = False
-    if 'confirm_delete' not in st.session_state:
-        st.session_state.confirm_delete = False
     if 'celebration_fired' not in st.session_state:
         st.session_state.celebration_fired = False
     if 'owner_authenticated' not in st.session_state:
@@ -1116,31 +1114,8 @@ def main():
                 st.markdown(f"**{p['phrase']}**{done_mark}")
                 st.caption(f"> {p['example']}")
 
-        st.divider()
-        if st.session_state.owner_authenticated:
-            st.subheader("🔄 Reset")
-            if not st.session_state.confirm_delete:
-                if st.button("🗑️ Delete Local Data", type="secondary"):
-                    st.session_state.confirm_delete = True
-                    st.rerun()
-            else:
-                st.warning(
-                    f"⚠️ This will erase **all** local data "
-                    f"(including your {data['daily_streak']}-day streak). Are you sure?"
-                )
-                confirm_col, cancel_col = st.columns(2)
-                with confirm_col:
-                    if st.button("✅ Yes, Delete", type="primary"):
-                        if DATA_FILE.exists():
-                            DATA_FILE.unlink()
-                        for key in list(st.session_state.keys()):
-                            del st.session_state[key]
-                        st.warning("⚠️ Please refresh the page")
-                with cancel_col:
-                    if st.button("❌ Cancel"):
-                        st.session_state.confirm_delete = False
-                        st.rerun()
-        else:
+        if not st.session_state.owner_authenticated:
+            st.divider()
             st.caption("🔒 Guest session — data resets on refresh")
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
