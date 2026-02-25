@@ -170,8 +170,32 @@ class GistStorage:
             return False, str(e)
 
 
+def _migrate_data(data):
+    """Normalise and migrate loaded data (shared by Gist + local file paths)."""
+    if 'settings' not in data:
+        data['settings'] = {}
+    # Keys are never loaded from storage; injected at runtime based on auth
+    data['settings']['api_key'] = ''
+    data['settings']['deepseek_key'] = ''
+    data['settings']['api_provider'] = data['settings'].get('api_provider', 'openai')
+    # Migrate: add category field
+    for phrase in data.get('phrase_pool', []):
+        if 'category' not in phrase:
+            phrase['category'] = 'Daily'
+    for phrase in data.get('learning', []):
+        if 'category' not in phrase:
+            phrase['category'] = 'Daily'
+    for phrase in data.get('mastered', []):
+        if 'category' not in phrase:
+            phrase['category'] = 'Daily'
+    # Migrate: add dismissed list
+    if 'dismissed' not in data:
+        data['dismissed'] = []
+    return data
+
+
 def load_data():
-    """Load data from Gist or create new"""
+    """Load data from Gist or local file, falling back to fresh data."""
     secrets = load_secrets()
     github_token = st.session_state.get('github_token', '')
     gist_id = st.session_state.get('gist_id', '')
@@ -181,31 +205,18 @@ def load_data():
         data, error = storage.read_gist()
 
         if data:
-            if 'settings' not in data:
-                data['settings'] = {}
+            return _migrate_data(data)
 
-            # Keys are never loaded from Gist; injected at runtime based on auth
-            data['settings']['api_key'] = ''
-            data['settings']['deepseek_key'] = ''
-            data['settings']['api_provider'] = data['settings'].get('api_provider', 'openai')
+    # Fallback: read from local file
+    if DATA_FILE.exists():
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return _migrate_data(data)
+        except Exception:
+            pass
 
-            # Migrate: add category field
-            for phrase in data.get('phrase_pool', []):
-                if 'category' not in phrase:
-                    phrase['category'] = 'Daily'
-            for phrase in data.get('learning', []):
-                if 'category' not in phrase:
-                    phrase['category'] = 'Daily'
-            for phrase in data.get('mastered', []):
-                if 'category' not in phrase:
-                    phrase['category'] = 'Daily'
-            # Migrate: add dismissed list
-            if 'dismissed' not in data:
-                data['dismissed'] = []
-
-            return data
-
-    # Create fresh data if no Gist
+    # Create fresh data if nothing exists
     return {
         "phrase_pool": DEFAULT_PHRASE_POOL,
         "learning": [],
