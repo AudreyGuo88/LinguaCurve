@@ -1087,13 +1087,9 @@ def main():
             st.session_state.nav_to_tab = 2
             st.rerun()
 
-        # 3. New Today — brand-new phrases introduced this session
-        # (no filter against today_phrases_sidebar — completed phrases leave that list)
-        new_today_list = [
-            get_phrase_data(data, pt)
-            for pt in st.session_state.session_new_phrases
-        ]
-        new_today_list = [p for p in new_today_list if p is not None]
+        # 3. New Today — brand-new phrases (from phrase_pool, no review_count field)
+        new_today_list = [p for p in st.session_state.session_today_phrases
+                          if 'review_count' not in p]
         new_done_count = sum(1 for p in new_today_list if p['phrase'] in st.session_state.reviewed_today)
         with st.expander(f"🌱 New Today ({new_done_count}/{len(new_today_list)})"):
             for p in new_today_list:
@@ -1101,18 +1097,16 @@ def main():
                 st.markdown(f"**{p['phrase']}**{done_mark}")
                 st.caption(f"> {p['example']}")
 
-        # 4. Reviewed Today — SRS-due phrases revisited this session
-        rev_today_list = [
-            get_phrase_data(data, pt)
-            for pt in st.session_state.session_review_phrases
-        ]
-        rev_today_list = [p for p in rev_today_list if p is not None]
-        rev_done_count = sum(1 for p in rev_today_list if p['phrase'] in st.session_state.reviewed_today)
-        with st.expander(f"🔁 Reviewed Today ({rev_done_count}/{len(rev_today_list)})"):
-            for p in rev_today_list:
-                done_mark = " ✅" if p['phrase'] in st.session_state.reviewed_today else ""
-                st.markdown(f"**{p['phrase']}**{done_mark}")
-                st.caption(f"> {p['example']}")
+        # 4. Reviewed Today — SRS-due phrases (from data['learning'], have review_count field)
+        rev_today_list = [p for p in st.session_state.session_today_phrases
+                          if 'review_count' in p]
+        if rev_today_list:
+            rev_done_count = sum(1 for p in rev_today_list if p['phrase'] in st.session_state.reviewed_today)
+            with st.expander(f"🔁 Reviewed Today ({rev_done_count}/{len(rev_today_list)})"):
+                for p in rev_today_list:
+                    done_mark = " ✅" if p['phrase'] in st.session_state.reviewed_today else ""
+                    st.markdown(f"**{p['phrase']}**{done_mark}")
+                    st.caption(f"> {p['example']}")
 
         if not st.session_state.owner_authenticated:
             st.divider()
