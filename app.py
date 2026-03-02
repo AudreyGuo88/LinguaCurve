@@ -33,6 +33,7 @@ def load_secrets():
             secrets['deepseek_key'] = st.secrets.get("DEEPSEEK_API_KEY", "")
             secrets['gist_id'] = st.secrets.get("GIST_ID", "")
             secrets['owner_password'] = st.secrets.get("OWNER_PASSWORD", "")
+            secrets['auto_login_key'] = st.secrets.get("AUTO_LOGIN_KEY", "")
     except Exception:
         pass
 
@@ -864,6 +865,10 @@ def main():
         st.session_state.celebration_fired = False
     if 'owner_authenticated' not in st.session_state:
         st.session_state.owner_authenticated = False
+        # Auto-login via URL token, e.g. ?key=YOUR_SECRET
+        auto_key = secrets.get('auto_login_key', '')
+        if auto_key and st.query_params.get('key') == auto_key:
+            st.session_state.owner_authenticated = True
     if 'guest_openai_key' not in st.session_state:
         st.session_state.guest_openai_key = ''
     if 'guest_deepseek_key' not in st.session_state:
@@ -922,6 +927,8 @@ def main():
                 st.session_state.owner_authenticated = False
                 st.session_state.guest_openai_key = ''
                 st.session_state.guest_deepseek_key = ''
+                st.session_state.session_today_phrases = []
+                st.session_state.reviewed_today = set()
                 st.rerun()
         else:
             with st.expander("🔐 Owner Login"):
@@ -930,6 +937,8 @@ def main():
                     if st.button("Login", key="owner_login_btn"):
                         if pwd_input == secrets.get('owner_password', ''):
                             st.session_state.owner_authenticated = True
+                            st.session_state.session_today_phrases = []
+                            st.session_state.reviewed_today = set()
                             st.rerun()
                         else:
                             st.error("Incorrect password")
