@@ -1185,7 +1185,7 @@ def main():
 
             # ── Section 1: Up Next ─────────────────────────────────────────
             if pending_phrases:
-                review_ct = sum(1 for p in pending_phrases if p['phrase'] in st.session_state.session_review_phrases)
+                review_ct = sum(1 for p in pending_phrases if 'review_count' in p)
                 new_ct = len(pending_phrases) - review_ct
                 if review_ct > 0 and new_ct > 0:
                     up_next_sub = f"{new_ct} new · {review_ct} SRS reviews"
@@ -1211,7 +1211,7 @@ def main():
 
                         with header_col:
                             st.markdown(f"### {proficiency_icon} {phrase_text}")
-                            is_srs_review = phrase_text in st.session_state.session_review_phrases
+                            is_srs_review = 'review_count' in phrase_data
                             type_badge = (
                                 '<span style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d;'
                                 'border-radius:12px;padding:2px 9px;font-size:0.75em;font-weight:600;'
@@ -1590,13 +1590,15 @@ def main():
             st.caption(
                 "🌳 = Completed full SRS cycle    ⭐ = Manually marked as known (removed from review schedule)"
             )
+            # Build index map so duplicate phrase texts don't create duplicate widget keys
+            indexed_mastered = list(enumerate(all_mastered))
             for cat, cat_emoji in CATEGORIES:
-                cat_phrases = [p for p in all_mastered if p.get('category') == cat]
+                cat_phrases = [(i, p) for i, p in indexed_mastered if p.get('category') == cat]
                 if not cat_phrases:
                     continue
                 st.markdown(f"**{cat_emoji} {cat}** &nbsp; `{len(cat_phrases)}`",
                             unsafe_allow_html=True)
-                for p in cat_phrases:
+                for i, p in cat_phrases:
                     badge = "⭐" if p['phrase'] in dismissed_set else "🌳"
                     with st.expander(f"{badge} {p['phrase']}"):
                         st.markdown(f"**🇨🇳 Chinese:** {p.get('chinese', '')}")
@@ -1607,8 +1609,8 @@ def main():
                         tts_col, restore_col = st.columns([1, 2])
                         with tts_col:
                             if TTS_AVAILABLE:
-                                tts_k = f"mast_tts_{p['phrase']}"
-                                if st.button("🔊 Listen", key=f"mast_tts_btn_{p['phrase']}"):
+                                tts_k = f"mast_tts_{i}"
+                                if st.button("🔊 Listen", key=f"mast_tts_btn_{i}"):
                                     st.session_state[tts_k] = not st.session_state.get(tts_k, False)
                                 if st.session_state.get(tts_k, False):
                                     audio = get_tts_audio(p['phrase'])
@@ -1617,7 +1619,7 @@ def main():
                         with restore_col:
                             if st.button(
                                 "↩️ Re-learn",
-                                key=f"restore_{p['phrase']}",
+                                key=f"restore_{i}",
                                 help="Move back into the spaced repetition schedule",
                                 type="secondary"
                             ):
