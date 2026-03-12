@@ -636,6 +636,30 @@ def get_phrase_data(data, phrase_text):
     return None
 
 
+def remove_dismissed_from_session_today(data):
+    """Keep today's locked list in sync after phrases are marked as known."""
+    dismissed_texts = {p['phrase'] for p in data.get('dismissed', [])}
+    if not dismissed_texts:
+        return
+
+    locked = st.session_state.get('session_today_phrases', [])
+    filtered_locked = [p for p in locked if p['phrase'] not in dismissed_texts]
+    if len(filtered_locked) == len(locked):
+        return
+
+    removed = {p['phrase'] for p in locked if p['phrase'] in dismissed_texts}
+    st.session_state.session_today_phrases = filtered_locked
+    st.session_state.reviewed_today = {
+        p for p in st.session_state.get('reviewed_today', set()) if p not in removed
+    }
+    st.session_state.session_new_phrases = {
+        p for p in st.session_state.get('session_new_phrases', set()) if p not in removed
+    }
+    st.session_state.session_review_phrases = {
+        p for p in st.session_state.get('session_review_phrases', set()) if p not in removed
+    }
+
+
 def get_proficiency_icon(review_count, is_mastered=False):
     """Return growth stage icon based on review progress"""
     if is_mastered:
@@ -1050,6 +1074,8 @@ def main():
                 p['phrase'] for p in fresh if p['phrase'] in learning_set_now
             }
 
+        # If user marks "I Know This", make sure it disappears from today's locked list.
+        remove_dismissed_from_session_today(data)
         locked_phrases = st.session_state.session_today_phrases
 
         # ── Today's progress bar ──
@@ -1088,16 +1114,15 @@ def main():
         # ── 4-item navigation library ──────────────────────────────────────────
 
         # 1 & 2: In Progress / Mastered — nav buttons → Progress tab
-        mastered_all = data['mastered'] + data.get('dismissed', [])
         if st.button(f"📖 In Progress  ({len(data['learning'])})", use_container_width=True):
             st.session_state.nav_to_tab = 2
             st.rerun()
-        if st.button(f"✅ Mastered  ({len(mastered_all)})", use_container_width=True):
+        if st.button(f"✅ Mastered  ({len(data['mastered'])})", use_container_width=True):
             st.session_state.nav_to_tab = 2
             st.rerun()
 
         # 3. New Today — brand-new phrases (from phrase_pool, no review_count field)
-        new_today_list = [p for p in st.session_state.session_today_phrases
+        new_today_list = [p for p in locked_phrases
                           if 'review_count' not in p]
         new_done_count = sum(1 for p in new_today_list if p['phrase'] in st.session_state.reviewed_today)
         with st.expander(f"🌱 New Today ({new_done_count}/{len(new_today_list)})"):
@@ -1107,7 +1132,7 @@ def main():
                 st.caption(f"> {p['example']}")
 
         # 4. Reviewed Today — SRS-due phrases (from data['learning'], have review_count field)
-        rev_today_list = [p for p in st.session_state.session_today_phrases
+        rev_today_list = [p for p in locked_phrases
                           if 'review_count' in p]
         if rev_today_list:
             rev_done_count = sum(1 for p in rev_today_list if p['phrase'] in st.session_state.reviewed_today)
@@ -1590,17 +1615,12 @@ def main():
                                         st.audio(audio, format='audio/mp3')
             st.divider()
 
-        # ── Mastered: auto-completed SRS + manually dismissed, by category ────
-        all_mastered = data.get('mastered', []) + data.get('dismissed', [])
-        if all_mastered:
-            dismissed_set = {p['phrase'] for p in data.get('dismissed', [])}
-            total_mastered = len(all_mastered)
-            st.subheader(f"🌟 Mastered  `{total_mastered}`")
-            st.caption(
-                "🌳 = Completed full SRS cycle    ⭐ = Manually marked as known (removed from review schedule)"
-            )
-            # Build index map so duplicate phrase texts don't create duplicate widget keys
-            indexed_mastered = list(enumerate(all_mastered))
+        # ── Mastered: auto-completed SRS phrases, by category ──────────────────
+        mastered_list = data.get('mastered', [])
+        if mastered_list:
+            st.subheader(f"🌳 Mastered  `{len(mastered_list)}`")
+            st.caption("Completed the full spaced repetition cycle.")
+            indexed_mastered = list(enumerate(mastered_list))
             for cat, cat_emoji in CATEGORIES:
                 cat_phrases = [(i, p) for i, p in indexed_mastered if p.get('category') == cat]
                 if not cat_phrases:
@@ -1608,12 +1628,9 @@ def main():
                 st.markdown(f"**{cat_emoji} {cat}** &nbsp; `{len(cat_phrases)}`",
                             unsafe_allow_html=True)
                 for i, p in cat_phrases:
-                    badge = "⭐" if p['phrase'] in dismissed_set else "🌳"
-                    with st.expander(f"{badge} {p['phrase']}"):
+                    with st.expander(f"🌳 {p['phrase']}"):
                         st.markdown(f"**🇨🇳 Chinese:** {p.get('chinese', '')}")
                         st.markdown(f"**✍️ Example:**  \n> *{p.get('example', '')}*")
-                        if p['phrase'] in dismissed_set:
-                            st.caption(f"⭐ Marked as known on {p.get('dismissed_on', 'unknown date')}")
 
                         tts_col, restore_col = st.columns([1, 2])
                         with tts_col:
@@ -1628,7 +1645,46 @@ def main():
                         with restore_col:
                             if st.button(
                                 "↩️ Re-learn",
-                                key=f"restore_{i}",
+                                key=f"restore_m_{i}",
+                                help="Move back into the spaced repetition schedule",
+                                type="secondary"
+                            ):
+                                restore_phrase(data, p['phrase'])
+                                st.rerun()
+            st.divider()
+
+        # ── Known: manually marked as known (dismissed), by category ───────────
+        known_list = data.get('dismissed', [])
+        if known_list:
+            st.subheader(f"⭐ Known  `{len(known_list)}`")
+            st.caption("Manually marked as known and removed from daily learning/review.")
+            indexed_known = list(enumerate(known_list))
+            for cat, cat_emoji in CATEGORIES:
+                cat_phrases = [(i, p) for i, p in indexed_known if p.get('category') == cat]
+                if not cat_phrases:
+                    continue
+                st.markdown(f"**{cat_emoji} {cat}** &nbsp; `{len(cat_phrases)}`",
+                            unsafe_allow_html=True)
+                for i, p in cat_phrases:
+                    with st.expander(f"⭐ {p['phrase']}"):
+                        st.markdown(f"**🇨🇳 Chinese:** {p.get('chinese', '')}")
+                        st.markdown(f"**✍️ Example:**  \n> *{p.get('example', '')}*")
+                        st.caption(f"⭐ Marked as known on {p.get('dismissed_on', 'unknown date')}")
+
+                        tts_col, restore_col = st.columns([1, 2])
+                        with tts_col:
+                            if TTS_AVAILABLE:
+                                tts_k = f"known_tts_{i}"
+                                if st.button("🔊 Listen", key=f"known_tts_btn_{i}"):
+                                    st.session_state[tts_k] = not st.session_state.get(tts_k, False)
+                                if st.session_state.get(tts_k, False):
+                                    audio = get_tts_audio(p['phrase'])
+                                    if audio:
+                                        st.audio(audio, format='audio/mp3')
+                        with restore_col:
+                            if st.button(
+                                "↩️ Re-learn",
+                                key=f"restore_k_{i}",
                                 help="Move back into the spaced repetition schedule",
                                 type="secondary"
                             ):
