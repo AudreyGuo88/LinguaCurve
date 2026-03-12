@@ -50,7 +50,7 @@ def load_secrets():
 # ============================================================================
 
 DATA_FILE = Path("learning_data.json")
-CLOUD_SYNC_INTERVAL_SECONDS = 5
+CLOUD_SYNC_IDLE_SECONDS = 600
 
 DEFAULT_PHRASE_POOL = [
     {"phrase": "break the ice", "chinese": "打破僵局", "example": "Let me tell a joke to break the ice.",
@@ -374,18 +374,18 @@ def update_streak(data, save_now=True):
 
 
 def save_data(data, force_cloud=False):
-    """Save data locally/session immediately and sync cloud with light throttling."""
+    """Save data locally/session immediately; cloud sync is deferred until idle or forced."""
     data_to_save = copy.deepcopy(data)
     if 'settings' in data_to_save:
         data_to_save['settings']['api_key'] = ''
         data_to_save['settings']['deepseek_key'] = ''
 
-    # ── Guest mode: keep data in session only, never write to disk / Gist ────
+    # -- Guest mode: keep data in session only, never write to disk / Gist --
     if not st.session_state.get('owner_authenticated', False):
         st.session_state.guest_data = data_to_save
         return
 
-    # ── Owner mode: persist locally first (fast and reliable) ─────────────────
+    # -- Owner mode: persist locally first (fast and reliable) --
     try:
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data_to_save, f, ensure_ascii=False, indent=2)
@@ -398,16 +398,19 @@ def save_data(data, force_cloud=False):
         return
 
     now_ts = time.time()
-    last_sync_ts = st.session_state.get('cloud_last_sync_ts', 0.0)
-    min_interval = st.session_state.get('cloud_sync_interval_seconds', CLOUD_SYNC_INTERVAL_SECONDS)
 
-    if not force_cloud and (now_ts - last_sync_ts) < min_interval:
+    if force_cloud:
+        payload = st.session_state.get('cloud_sync_pending_data', data_to_save)
+    else:
+        # Debounce cloud sync: only push after user has been idle for the configured window.
+        st.session_state.cloud_sync_pending_data = data_to_save
+        st.session_state.cloud_last_change_ts = now_ts
         st.session_state.cloud_sync_pending = True
         st.session_state.cloud_sync_status = 'pending'
         return
 
     storage = GistStorage(github_token, gist_id)
-    success, error = storage.update_gist(data_to_save)
+    success, error = storage.update_gist(payload)
 
     if success:
         if not gist_id and storage.gist_id:
@@ -416,6 +419,7 @@ def save_data(data, force_cloud=False):
         st.session_state.cloud_sync_pending = False
         st.session_state.cloud_sync_status = 'synced'
         st.session_state.cloud_last_sync_ts = now_ts
+        st.session_state.cloud_sync_pending_data = payload
     elif error:
         st.session_state.cloud_sync_pending = True
         st.session_state.cloud_sync_status = f"error: {error}"
@@ -947,8 +951,12 @@ def main():
         st.session_state.cloud_sync_status = 'idle'
     if 'cloud_last_sync_ts' not in st.session_state:
         st.session_state.cloud_last_sync_ts = 0.0
-    if 'cloud_sync_interval_seconds' not in st.session_state:
-        st.session_state.cloud_sync_interval_seconds = CLOUD_SYNC_INTERVAL_SECONDS
+    if 'cloud_sync_idle_seconds' not in st.session_state:
+        st.session_state.cloud_sync_idle_seconds = CLOUD_SYNC_IDLE_SECONDS
+    if 'cloud_last_change_ts' not in st.session_state:
+        st.session_state.cloud_last_change_ts = 0.0
+    if 'cloud_sync_pending_data' not in st.session_state:
+        st.session_state.cloud_sync_pending_data = None
 
     # ── Load data ─────────────────────────────────────────────────────────────
     if st.session_state.owner_authenticated:
@@ -976,6 +984,17 @@ def main():
         # Use guest-supplied keys (stored in session state, not persisted)
         data['settings']['api_key'] = st.session_state.guest_openai_key
         data['settings']['deepseek_key'] = st.session_state.guest_deepseek_key
+
+    # Opportunistic cloud sync: when there is pending data and idle window is reached.
+    if (
+        st.session_state.owner_authenticated
+        and st.session_state.get('github_token')
+        and st.session_state.get('cloud_sync_pending', False)
+    ):
+        idle_seconds = st.session_state.get('cloud_sync_idle_seconds', CLOUD_SYNC_IDLE_SECONDS)
+        last_change_ts = st.session_state.get('cloud_last_change_ts', 0.0)
+        if (time.time() - last_change_ts) >= idle_seconds:
+            save_data(data, force_cloud=True)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # SIDEBAR
@@ -1017,7 +1036,7 @@ def main():
             cloud_status = st.session_state.get('cloud_sync_status', 'idle')
 
             if cloud_pending:
-                st.warning("☁️ Cloud: Pending sync")
+                st.warning("☁️ Cloud: Pending (sync after 10m idle)")
             elif isinstance(cloud_status, str) and cloud_status.startswith('error:'):
                 st.warning("☁️ Cloud: Retry pending")
             elif cloud_status == 'synced':
