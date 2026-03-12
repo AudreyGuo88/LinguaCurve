@@ -50,6 +50,7 @@ def load_secrets():
 # ============================================================================
 
 DATA_FILE = Path("learning_data.json")
+CLOUD_SYNC_INTERVAL_SECONDS = 5
 
 DEFAULT_PHRASE_POOL = [
     {"phrase": "break the ice", "chinese": "打破僵局", "example": "Let me tell a joke to break the ice.",
@@ -265,7 +266,7 @@ def calculate_next_review(review_count):
     return (datetime.now() + timedelta(days=intervals[review_count])).strftime('%Y-%m-%d')
 
 
-def mark_reviewed(data, phrase_text):
+def mark_reviewed(data, phrase_text, save_now=True):
     """Mark a phrase as reviewed and update next review date"""
     for phrase in data['learning']:
         if phrase['phrase'] == phrase_text:
@@ -279,7 +280,8 @@ def mark_reviewed(data, phrase_text):
             else:
                 phrase['next_review'] = next_date
 
-            save_data(data)
+            if save_now:
+                save_data(data)
             return True
 
     phrase_data = next((p for p in data['phrase_pool'] if p['phrase'] == phrase_text), None)
@@ -294,13 +296,14 @@ def mark_reviewed(data, phrase_text):
             "next_review": calculate_next_review(0)
         }
         data['learning'].append(new_phrase)
-        save_data(data)
+        if save_now:
+            save_data(data)
         return True
 
     return False
 
 
-def dismiss_phrase(data, phrase_text):
+def dismiss_phrase(data, phrase_text, save_now=True):
     """Remove a phrase from the SRS cycle."""
     # Already in learning — move it out
     for phrase in data['learning']:
@@ -308,7 +311,8 @@ def dismiss_phrase(data, phrase_text):
             phrase['dismissed_on'] = datetime.now().strftime('%Y-%m-%d')
             data.setdefault('dismissed', []).append(phrase)
             data['learning'].remove(phrase)
-            save_data(data)
+            if save_now:
+                save_data(data)
             return True
 
     # New phrase (only in pool) — add directly to dismissed
@@ -322,7 +326,8 @@ def dismiss_phrase(data, phrase_text):
             "review_count": 0,
             "dismissed_on": datetime.now().strftime('%Y-%m-%d'),
         })
-        save_data(data)
+        if save_now:
+            save_data(data)
         return True
 
     return False
@@ -348,7 +353,7 @@ def restore_phrase(data, phrase_text):
     return False
 
 
-def update_streak(data):
+def update_streak(data, save_now=True):
     """Update daily streak counter"""
     today = datetime.now().strftime('%Y-%m-%d')
     last_study = data.get('last_study_date')
@@ -364,11 +369,12 @@ def update_streak(data):
                 data['daily_streak'] = 1
 
         data['last_study_date'] = today
-        save_data(data)
+        if save_now:
+            save_data(data)
 
 
-def save_data(data):
-    """Save data to Gist/file (owner) or session state only (guest)."""
+def save_data(data, force_cloud=False):
+    """Save data locally/session immediately and sync cloud with light throttling."""
     data_to_save = copy.deepcopy(data)
     if 'settings' in data_to_save:
         data_to_save['settings']['api_key'] = ''
@@ -379,7 +385,7 @@ def save_data(data):
         st.session_state.guest_data = data_to_save
         return
 
-    # ── Owner mode: persist to local file and Gist ────────────────────────────
+    # ── Owner mode: persist locally first (fast and reliable) ─────────────────
     try:
         with open(DATA_FILE, 'w', encoding='utf-8') as f:
             json.dump(data_to_save, f, ensure_ascii=False, indent=2)
@@ -388,8 +394,16 @@ def save_data(data):
 
     github_token = st.session_state.get('github_token', '')
     gist_id = st.session_state.get('gist_id', '')
-
     if not github_token:
+        return
+
+    now_ts = time.time()
+    last_sync_ts = st.session_state.get('cloud_last_sync_ts', 0.0)
+    min_interval = st.session_state.get('cloud_sync_interval_seconds', CLOUD_SYNC_INTERVAL_SECONDS)
+
+    if not force_cloud and (now_ts - last_sync_ts) < min_interval:
+        st.session_state.cloud_sync_pending = True
+        st.session_state.cloud_sync_status = 'pending'
         return
 
     storage = GistStorage(github_token, gist_id)
@@ -399,8 +413,14 @@ def save_data(data):
         if not gist_id and storage.gist_id:
             st.session_state.gist_id = storage.gist_id
             st.success(f"✅ Gist created! ID: {storage.gist_id}")
+        st.session_state.cloud_sync_pending = False
+        st.session_state.cloud_sync_status = 'synced'
+        st.session_state.cloud_last_sync_ts = now_ts
     elif error:
-        st.warning(f"⚠️ Cloud sync failed: {error}")
+        st.session_state.cloud_sync_pending = True
+        st.session_state.cloud_sync_status = f"error: {error}"
+        if force_cloud:
+            st.warning(f"⚠️ Cloud sync failed: {error}")
 
 
 # ============================================================================
@@ -659,6 +679,18 @@ def remove_dismissed_from_session_today(data):
         p for p in st.session_state.get('session_review_phrases', set()) if p not in removed
     }
 
+def remove_phrase_from_session_today(phrase_text):
+    """Immediately remove a resolved phrase from today's session state."""
+    locked = st.session_state.get('session_today_phrases', [])
+    filtered_locked = [p for p in locked if p['phrase'] != phrase_text]
+    if len(filtered_locked) == len(locked):
+        return
+
+    st.session_state.session_today_phrases = filtered_locked
+    st.session_state.reviewed_today.discard(phrase_text)
+    st.session_state.session_new_phrases.discard(phrase_text)
+    st.session_state.session_review_phrases.discard(phrase_text)
+
 
 def get_proficiency_icon(review_count, is_mastered=False):
     """Return growth stage icon based on review progress"""
@@ -909,6 +941,14 @@ def main():
         st.session_state.session_new_phrases = set()
     if 'session_review_phrases' not in st.session_state:
         st.session_state.session_review_phrases = set()
+    if 'cloud_sync_pending' not in st.session_state:
+        st.session_state.cloud_sync_pending = False
+    if 'cloud_sync_status' not in st.session_state:
+        st.session_state.cloud_sync_status = 'idle'
+    if 'cloud_last_sync_ts' not in st.session_state:
+        st.session_state.cloud_last_sync_ts = 0.0
+    if 'cloud_sync_interval_seconds' not in st.session_state:
+        st.session_state.cloud_sync_interval_seconds = CLOUD_SYNC_INTERVAL_SECONDS
 
     # ── Load data ─────────────────────────────────────────────────────────────
     if st.session_state.owner_authenticated:
@@ -973,9 +1013,24 @@ def main():
 
         # Cloud connection status
         if st.session_state.get('github_token'):
-            st.success("☁️ Cloud: Connected")
+            cloud_pending = st.session_state.get('cloud_sync_pending', False)
+            cloud_status = st.session_state.get('cloud_sync_status', 'idle')
+
+            if cloud_pending:
+                st.warning("☁️ Cloud: Pending sync")
+            elif isinstance(cloud_status, str) and cloud_status.startswith('error:'):
+                st.warning("☁️ Cloud: Retry pending")
+            elif cloud_status == 'synced':
+                st.success("☁️ Cloud: Synced")
+            else:
+                st.success("☁️ Cloud: Connected")
+
             if st.session_state.get('gist_id'):
                 st.caption(f"Gist: `{st.session_state.gist_id[:8]}...`")
+
+            if st.button("☁️ Sync Now", key="cloud_sync_now", use_container_width=True):
+                save_data(data, force_cloud=True)
+                st.rerun()
 
         if not secrets.get('github_token'):
             with st.expander("☁️ Manual Cloud Setup"):
@@ -1151,6 +1206,17 @@ def main():
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     tab1, tab2, tab3 = st.tabs(["📚 Today's Learning", "💬 Practice Chat", "📊 Progress"])
 
+    def handle_mark_done(phrase_text):
+        if mark_reviewed(data, phrase_text, save_now=False):
+            st.session_state.reviewed_today.add(phrase_text)
+            update_streak(data, save_now=False)
+            save_data(data)
+
+    def handle_mark_known(phrase_text):
+        if dismiss_phrase(data, phrase_text, save_now=False):
+            remove_phrase_from_session_today(phrase_text)
+            save_data(data)
+
     # ── JS tab navigation (fires once when nav_to_tab is set by sidebar) ──────
     if st.session_state.nav_to_tab is not None:
         tab_idx = st.session_state.nav_to_tab
@@ -1265,24 +1331,21 @@ def main():
 
                         with action_col:
                             st.write("")
-                            if st.button(
+                            st.button(
                                 "✅ Mark Done",
                                 key=f"review_up_{idx}",
-                                type="primary"
-                            ):
-                                mark_reviewed(data, phrase_text)
-                                update_streak(data)
-                                st.session_state.reviewed_today.add(phrase_text)
-                                st.rerun()
-                            if st.button(
+                                type="primary",
+                                on_click=handle_mark_done,
+                                args=(phrase_text,)
+                            )
+                            st.button(
                                 "⭐ I Know This",
                                 key=f"dismiss_up_{idx}",
                                 help="I've fully mastered this — remove it from the review schedule",
-                                type="secondary"
-                            ):
-                                dismiss_phrase(data, phrase_text)
-                                st.session_state.reviewed_today.discard(phrase_text)
-                                st.rerun()
+                                type="secondary",
+                                on_click=handle_mark_known,
+                                args=(phrase_text,)
+                            )
 
                         with st.expander(
                             "🧠 Reveal: Translation & Example",
@@ -1444,9 +1507,10 @@ def main():
                                 # Auto-mark all 5 challenge phrases as reviewed
                                 for p in today_phrases[:5]:
                                     if p['phrase'] not in st.session_state.reviewed_today:
-                                        mark_reviewed(data, p['phrase'])
+                                        mark_reviewed(data, p['phrase'], save_now=False)
                                         st.session_state.reviewed_today.add(p['phrase'])
-                                update_streak(data)
+                                update_streak(data, save_now=False)
+                                save_data(data)
                                 st.rerun()
                             else:
                                 st.error("Some blanks are wrong — try again!")
