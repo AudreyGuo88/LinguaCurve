@@ -957,6 +957,8 @@ def main():
         st.session_state.cloud_last_change_ts = 0.0
     if 'cloud_sync_pending_data' not in st.session_state:
         st.session_state.cloud_sync_pending_data = None
+    if 'progress_mode' not in st.session_state:
+        st.session_state.progress_mode = 'in_progress'
 
     # ── Load data ─────────────────────────────────────────────────────────────
     if st.session_state.owner_authenticated:
@@ -1187,12 +1189,14 @@ def main():
 
         # ── 4-item navigation library ──────────────────────────────────────────
 
-        # 1 & 2: In Progress / Mastered — nav buttons → Progress tab
+        # 1 & 2: In Progress / Mastered — nav buttons → Progress tab (with mode pre-set)
         if st.button(f"📖 In Progress  ({len(data['learning'])})", use_container_width=True):
             st.session_state.nav_to_tab = 2
+            st.session_state.progress_mode = 'in_progress'
             st.rerun()
         if st.button(f"✅ Mastered  ({len(data['mastered'])})", use_container_width=True):
             st.session_state.nav_to_tab = 2
+            st.session_state.progress_mode = 'mastered'
             st.rerun()
 
         # 3. New Today — brand-new phrases (from phrase_pool, no review_count field)
@@ -1661,118 +1665,75 @@ def main():
         col4.metric("⭐ Known", len(data.get('dismissed', [])))
 
         CATEGORIES = [
-            ('Daily',     '🏠'),
-            ('Business',  '💼'),
-            ('Social',    '👥'),
+            ('Daily', '🏠'),
+            ('Business', '💼'),
+            ('Social', '👥'),
             ('TV Series', '📺'),
         ]
 
-        # ── In Progress: still on SRS, grouped by category ───────────────────
-        if data['learning']:
-            st.subheader("📚 In Progress")
-            st.caption("These phrases are still on the spaced repetition schedule.")
+        st.markdown("### 📚 Progress Browser")
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            if st.button("📖 In Progress", use_container_width=True, type="primary" if st.session_state.progress_mode == 'in_progress' else "secondary"):
+                st.session_state.progress_mode = 'in_progress'
+                st.rerun()
+        with m2:
+            if st.button("🌳 Mastered", use_container_width=True, type="primary" if st.session_state.progress_mode == 'mastered' else "secondary"):
+                st.session_state.progress_mode = 'mastered'
+                st.rerun()
+        with m3:
+            if st.button("⭐ Known", use_container_width=True, type="primary" if st.session_state.progress_mode == 'known' else "secondary"):
+                st.session_state.progress_mode = 'known'
+                st.rerun()
+
+        dismissed_set = {p['phrase'] for p in data.get('dismissed', [])}
+        mastered_set = {p['phrase'] for p in data.get('mastered', [])}
+
+        if st.session_state.progress_mode == 'in_progress':
+            # Safety filter: never show phrases that already exist in Known/Mastered.
+            source_list = [
+                p for p in data.get('learning', [])
+                if p['phrase'] not in dismissed_set and p['phrase'] not in mastered_set
+            ]
+            mode_title = "📖 In Progress"
+            empty_msg = "No phrases in progress."
+        elif st.session_state.progress_mode == 'mastered':
+            source_list = data.get('mastered', [])
+            mode_title = "🌳 Mastered"
+            empty_msg = "No mastered phrases yet."
+        else:
+            source_list = data.get('dismissed', [])
+            mode_title = "⭐ Known"
+            empty_msg = "No known phrases yet."
+
+        st.markdown(f"#### {mode_title}  `{len(source_list)}`")
+
+        if not source_list:
+            st.info(empty_msg)
+        else:
+            # Compact category cards: click card(expander) to reveal phrase-only list.
+            cat_map = {cat: [] for cat, _ in CATEGORIES}
+            for p in source_list:
+                cat = p.get('category', 'Daily')
+                if cat not in cat_map:
+                    cat = 'Daily'
+                cat_map[cat].append(p['phrase'])
+
+            left_col, right_col = st.columns(2)
+            category_columns = [left_col, right_col]
+            visible_idx = 0
+
             for cat, cat_emoji in CATEGORIES:
-                cat_phrases = [p for p in data['learning'] if p.get('category') == cat]
-                if not cat_phrases:
+                phrases = cat_map.get(cat, [])
+                if not phrases:
                     continue
-                st.markdown(f"**{cat_emoji} {cat}** &nbsp; `{len(cat_phrases)}`",
-                            unsafe_allow_html=True)
-                for p in cat_phrases:
-                    prof = get_proficiency_icon(p.get('review_count', 0))
-                    review_label = f"Review #{p.get('review_count', 0) + 1}"
-                    next_rev = p.get('next_review', '?')
-                    with st.expander(
-                        f"{prof} {p['phrase']}  ·  {review_label}  ·  next: {next_rev}"
-                    ):
-                        st.markdown(f"**🇨🇳 Chinese:** {p.get('chinese', '')}")
-                        st.markdown(f"**✍️ Example：**  \n> *{p.get('example', '')}*")
-                        tts_col, _ = st.columns([1, 3])
-                        with tts_col:
-                            if TTS_AVAILABLE:
-                                tts_k = f"prog_tts_{p['phrase']}"
-                                if st.button("🔊 Listen", key=f"prog_tts_btn_{p['phrase']}"):
-                                    st.session_state[tts_k] = not st.session_state.get(tts_k, False)
-                                if st.session_state.get(tts_k, False):
-                                    audio = get_tts_audio(p['phrase'])
-                                    if audio:
-                                        st.audio(audio, format='audio/mp3')
-            st.divider()
 
-        # ── Mastered: auto-completed SRS phrases, by category ──────────────────
-        mastered_list = data.get('mastered', [])
-        if mastered_list:
-            st.subheader(f"🌳 Mastered  `{len(mastered_list)}`")
-            st.caption("Completed the full spaced repetition cycle.")
-            indexed_mastered = list(enumerate(mastered_list))
-            for cat, cat_emoji in CATEGORIES:
-                cat_phrases = [(i, p) for i, p in indexed_mastered if p.get('category') == cat]
-                if not cat_phrases:
-                    continue
-                st.markdown(f"**{cat_emoji} {cat}** &nbsp; `{len(cat_phrases)}`",
-                            unsafe_allow_html=True)
-                for i, p in cat_phrases:
-                    with st.expander(f"🌳 {p['phrase']}"):
-                        st.markdown(f"**🇨🇳 Chinese:** {p.get('chinese', '')}")
-                        st.markdown(f"**✍️ Example:**  \n> *{p.get('example', '')}*")
-
-                        tts_col, restore_col = st.columns([1, 2])
-                        with tts_col:
-                            if TTS_AVAILABLE:
-                                tts_k = f"mast_tts_{i}"
-                                if st.button("🔊 Listen", key=f"mast_tts_btn_{i}"):
-                                    st.session_state[tts_k] = not st.session_state.get(tts_k, False)
-                                if st.session_state.get(tts_k, False):
-                                    audio = get_tts_audio(p['phrase'])
-                                    if audio:
-                                        st.audio(audio, format='audio/mp3')
-                        with restore_col:
-                            if st.button(
-                                "↩️ Re-learn",
-                                key=f"restore_m_{i}",
-                                help="Move back into the spaced repetition schedule",
-                                type="secondary"
-                            ):
-                                restore_phrase(data, p['phrase'])
-                                st.rerun()
-            st.divider()
-
-        # ── Known: manually marked as known (dismissed), by category ───────────
-        known_list = data.get('dismissed', [])
-        if known_list:
-            st.subheader(f"⭐ Known  `{len(known_list)}`")
-            st.caption("Manually marked as known and removed from daily learning/review.")
-            indexed_known = list(enumerate(known_list))
-            for cat, cat_emoji in CATEGORIES:
-                cat_phrases = [(i, p) for i, p in indexed_known if p.get('category') == cat]
-                if not cat_phrases:
-                    continue
-                st.markdown(f"**{cat_emoji} {cat}** &nbsp; `{len(cat_phrases)}`",
-                            unsafe_allow_html=True)
-                for i, p in cat_phrases:
-                    with st.expander(f"⭐ {p['phrase']}"):
-                        st.markdown(f"**🇨🇳 Chinese:** {p.get('chinese', '')}")
-                        st.markdown(f"**✍️ Example:**  \n> *{p.get('example', '')}*")
-                        st.caption(f"⭐ Marked as known on {p.get('dismissed_on', 'unknown date')}")
-
-                        tts_col, restore_col = st.columns([1, 2])
-                        with tts_col:
-                            if TTS_AVAILABLE:
-                                tts_k = f"known_tts_{i}"
-                                if st.button("🔊 Listen", key=f"known_tts_btn_{i}"):
-                                    st.session_state[tts_k] = not st.session_state.get(tts_k, False)
-                                if st.session_state.get(tts_k, False):
-                                    audio = get_tts_audio(p['phrase'])
-                                    if audio:
-                                        st.audio(audio, format='audio/mp3')
-                        with restore_col:
-                            if st.button(
-                                "↩️ Re-learn",
-                                key=f"restore_k_{i}",
-                                help="Move back into the spaced repetition schedule",
-                                type="secondary"
-                            ):
-                                restore_phrase(data, p['phrase'])
-                                st.rerun()
+                with category_columns[visible_idx % 2]:
+                    with st.container(border=True):
+                        with st.expander(f"{cat_emoji} {cat}  ({len(phrases)})", expanded=False):
+                            for phrase_text in phrases:
+                                st.markdown(f"- {phrase_text}")
+                visible_idx += 1
 
 
 if __name__ == "__main__":
